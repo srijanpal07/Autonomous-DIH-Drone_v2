@@ -74,7 +74,7 @@ print_yawrate = False
 print_flow=False
 print_alt = False
 
-#-----------------------srijan----------------------------#
+
 print_stat = False
 print_stat_test = True
 print_flags = False
@@ -92,7 +92,7 @@ track_sampling_time = True
 global fspeed_head, hspeed_head
 global print_iter
 print_iter = 0
-#------------------------srijan---------------------------#
+
 
 
 # bounding box options
@@ -337,7 +337,7 @@ def boundingbox_callback(box):
     return
 
 
-#--------------------------srijan--------------------------#
+
 def segmentation_callback(box):
     global horizontalerror_smoketrack, verticalerror_smoketrack, sizeerror_smoketrack, horizontalerror_smoketrack_list
     global time_lastbox_smoketrack, pitchcommand, yawcommand
@@ -373,7 +373,7 @@ def segmentation_callback(box):
         print('using: horizontalerror_smoketrack_list')
         horizontalerror_smoketrack = sum(horizontalerror_smoketrack_list[-20:]) / 20
     return
-#--------------------------srijan--------------------------#
+
 
 
 def flow_callback(flow):
@@ -433,10 +433,10 @@ def dofeedbackcontrol():
 
     #Initialize publishers/subscribers/node
     rospy.Subscriber('/bounding_box', Detection2D, boundingbox_callback)
-    #--------------------------srijan--------------------------#
+
     rospy.Subscriber('/segmentation_box', Detection2D, segmentation_callback)
     rospy.Subscriber('/mavros/state',State,state_callback)
-    #--------------------------srijan--------------------------#
+
     rospy.Subscriber('/mavros/local_position/pose', PoseStamped, pose_callback)
     rospy.Subscriber('/mavros/time_reference',TimeReference,time_callback)
     rospy.Subscriber('/mavros/global_position/global',NavSatFix,gps_callback)
@@ -633,14 +633,14 @@ def dofeedbackcontrol():
                 if print_stat: print(f'Too high ... Moving to setpoint alt at {vspeed} m/s')
 
 
-        #----------------------------srijan----------------------------#
+
         if sample_along_heading: #and not moving_to_set_alt: 
             if print_stat: print('Sample along heading test')
             forward_scan = False
             above_object = False
             if track_sampling_time: sampling_t0 = time.time()
             sample_heading_test(-fspeed_head,-hspeed_head)
-        #----------------------------srijan----------------------------#
+
 
 
         #bound controls to ranges
@@ -798,7 +798,7 @@ def survey_flow():
     print('#----------------------Survey complete------------------------#')
     surveying = False
 
-    #------------------------------srijan--------------------------------#
+
     print(f'yaw: {yaw}')
     i = 0
     twistmsg.linear.x = 0
@@ -838,12 +838,12 @@ def survey_flow():
     twistmsg.linear.z = 0
     twistmsg.angular.z = 0
     twistpub.publish(twistmsg)
-    #------------------------------srijan--------------------------------#
+
 
     return fspeed_surv,hspeed_surv
 
 
-#-------------------srijan----------------------#
+
 def sample_heading_test(fspeed_head,hspeed_head):
     """
     keeps fixed altitude and moves along a prescribed direction obtain from flow survey prior
@@ -866,7 +866,7 @@ def sample_heading_test(fspeed_head,hspeed_head):
 
     print_iter = print_iter + 1
 
-    #------------------------------------srijan------------------------------------#
+
     # moving towards the source of the smoke
     # stop motion in z-direction
     x_speed = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.2)
@@ -898,9 +898,9 @@ def sample_heading_test(fspeed_head,hspeed_head):
         track_sampling_time = True
         sample_along_heading = False
         print('Sampling Complete')        
-    #------------------------------------srijan------------------------------------#
+
     return
-#-------------------srijan----------------------#
+
 
 
 def save_log():
