@@ -18,6 +18,7 @@ import sys
 import numpy as np
 import datetime, time
 from pathlib import Path
+from filterpy.kalman import KalmanFilter
 
 
 global horizontalerror, verticalerror, sizeerror
@@ -74,7 +75,7 @@ print_yawrate = False
 print_flow=False
 print_alt = False
 
-
+#-----------------------srijan----------------------------#
 print_stat = False
 print_stat_test = True
 print_flags = False
@@ -92,7 +93,7 @@ track_sampling_time = True
 global fspeed_head, hspeed_head
 global print_iter
 print_iter = 0
-
+#------------------------srijan---------------------------#
 
 
 # bounding box options
@@ -172,6 +173,38 @@ yawcommand = yaw_center
 #ADDED for airsim
 airsim_yaw = 0
 publish_rate = 0
+
+
+
+# --------------------- Kalman Filter Initialization --------------------- #
+# Create a Kalman filter for yaw angle prediction
+global kf, previous_yaw_measurements
+previous_yaw_measurements = []
+kf = KalmanFilter(dim_x=2, dim_z=1)
+
+# Define the state transition matrix (constant velocity model)
+kf.F = np.array([[1.0, 1.0],
+                [0.0, 1.0]])
+
+# Define the measurement function (identity matrix for simplicity)
+kf.H = np.array([[1.0, 0.0]])
+
+# Define the process noise covariance matrix
+kf.Q = np.array([[0.01, 0.0],
+                [0.0, 0.01]])
+
+# Define the measurement noise covariance matrix
+kf.R = np.array([[0.1]])
+
+# Initialize the state estimate and covariance matrix
+initial_yaw = 0.0  # Initial yaw angle
+initial_yaw_rate = 0.0  # Initial yaw rate
+kf.x = np.array([[initial_yaw],
+                [initial_yaw_rate]])  # Initial state estimate
+kf.P *= 100.0  # Initial covariance matrix
+
+# --------------------- Kalman Filter Initialization --------------------- #
+
 
 
 def moveAirsimGimbal(pitchcommand, yawcommand):
@@ -337,13 +370,16 @@ def boundingbox_callback(box):
     return
 
 
-
+#--------------------------srijan--------------------------#
 def segmentation_callback(box):
     global horizontalerror_smoketrack, verticalerror_smoketrack, sizeerror_smoketrack, horizontalerror_smoketrack_list
     global time_lastbox_smoketrack, pitchcommand, yawcommand
     global MOVE_ABOVE, OPT_FLOW
+    global kf, previous_yaw_measurements
+    global sampling
     # positive errors give right, up
-    if box.bbox.center.x != -1 and box.bbox.size_x > 10000:
+    if box.bbox.center.x != -1 and box.bbox.size_x > 7000:
+        if sampling: print("Sampling ... Yawing using Segmentation data", end='\r')
         time_lastbox_smoketrack = rospy.Time.now()
         bboxsize = (box.bbox.size_x + box.bbox.size_y)/2 # take the average so that a very thin, long box will still be seen as small
         
@@ -359,21 +395,25 @@ def segmentation_callback(box):
         if not OPT_FLOW:
             if print_stat: print("OPT_FLOW is set to False: Optical flow not running")   
             horizontalerror_smoketrack = .5-box.bbox.center.x # if box center is on LHS of image, error is positive
-            horizontalerror_smoketrack_list.append(horizontalerror_smoketrack)
-            print(f'horizontalerror_smoketrack_list: {horizontalerror_smoketrack_list[-10:]}', end = '\r')
             verticalerror_smoketrack = .5-box.bbox.center.y # if box center is on upper half of image, error is positive 
+            
+            # Update the Kalman filter with the new measurement
+            update_kalman_filter(kf, horizontalerror_smoketrack)
+            previous_yaw_measurements.append(horizontalerror_smoketrack)
+            
             if print_stat: print(f'Horzontal error: {round(horizontalerror_smoketrack, 5)}, Vertical error: {round(verticalerror, 5)}')
-
             # if print_stat: print(f"Changed pitchcommand,delta: {round(pitchcommand, 5)},{round(pitchdelta, 5)}  changed yawcommand, delta: {round(yawcommand, 5)},{round(yawdelta, 5)}")
 
         if pitchcommand < pitch_thresh and bboxsize > 0.75: # if close and gimbal pitched upward, move to get above the object
             MOVE_ABOVE = True
             if print_stat: print('Gimbal pitched upward moving above to get above object ... : MOVE_ABOVE is set to True')
-    else:
-        print('using: horizontalerror_smoketrack_list')
-        horizontalerror_smoketrack = sum(horizontalerror_smoketrack_list[-20:]) / 20
-    return
 
+    else:
+        if sampling: print("Sampling ... Yawing using Kalman Filter Prediction", end='\r')
+        horizontalerror_smoketrack = kf.x[0, 0] 
+
+    return
+#--------------------------srijan--------------------------#
 
 
 def flow_callback(flow):
@@ -425,38 +465,32 @@ def dofeedbackcontrol():
     global twistpub, twistmsg,rcmsg,rcpub, gimbal
     global publish_rate
     global smoketrack_pub, sample_along_heading
-    # global body_vel_pub
     global sampling_t0, track_sampling_time
     global fspeed_head, hspeed_head
+    global kf, previous_yaw_measurements
     publish_rate = time.time()
 
 
     #Initialize publishers/subscribers/node
     rospy.Subscriber('/bounding_box', Detection2D, boundingbox_callback)
-
     rospy.Subscriber('/segmentation_box', Detection2D, segmentation_callback)
     rospy.Subscriber('/mavros/state',State,state_callback)
-
     rospy.Subscriber('/mavros/local_position/pose', PoseStamped, pose_callback)
     rospy.Subscriber('/mavros/time_reference',TimeReference,time_callback)
     rospy.Subscriber('/mavros/global_position/global',NavSatFix,gps_callback)
     rospy.Subscriber('/mavros/global_position/rel_alt',Float64,rel_alt_callback)
     rospy.Subscriber('/flow',BoundingBox2D,flow_callback)
     rospy.Subscriber('/mavros/state',State,state_callback)
-    # rospy.Subscriber('/airsim_node/origin_geo_point',GPSYaw,getAirsimYaw)
     twistpub = rospy.Publisher('/mavros/setpoint_velocity/cmd_vel_unstamped', Twist, queue_size=1)
     rcpub = rospy.Publisher('/mavros/rc/override', OverrideRCIn, queue_size=1)
     gimbal = rospy.Publisher('/airsim_node/gimbal_angle_euler_cmd', GimbalAngleEulerCmd, queue_size=1)
     smoketrack_pub = rospy.Publisher('/smoketrack', String, queue_size=1)
-    # body_vel_pub = rospy.Publisher('/mavros/setpoint_velocity/cmd_vel_body', TwistStamped, queue_size=10)
 
     # control loop
     twistmsg = Twist()
     rcmsg = OverrideRCIn()
     rcmsg.channels = np.zeros(18,dtype=np.uint16).tolist()
 
-    # move_cmd_body = TwistStamped()
-    # move_cmd_body.header.stamp = rospy.Time.now()
     rate = rospy.Rate(20) # 20hz - originally 20hz
 
 
@@ -467,10 +501,10 @@ def dofeedbackcontrol():
             vspeed = 0
             hspeed = 0
             if print_stat: print('Forward_scan is on and Scanning for object ...')
-            if print_flags: print('forward_scan_option = True and forward_scan = True')
+            if print_flags: print('forward_scan_option = True | forward_scan = True')
         else:
             if print_stat: print("Forward scan turned off as scanning for object was completed")
-            if print_flags: print('forward_scan_option = False or forward_scan = False')
+            if print_stat: print('Either forward_scan_option = False or forward_scan = False')
         
         #feedback control algorithm
         #don't publish if message is old
@@ -478,15 +512,12 @@ def dofeedbackcontrol():
             if print_stat: print("NOT GUIDED ...")
             pitchcommand = pitch_init 
             yawcommand = yaw_center
-            #fspeed = 
             hspeed = vspeed = 0
             yaw_mode = True # Previously True # turn yaw back on
             above_object = False
             moving_to_set_alt = False
             OPT_FLOW = False # turn off the optical flow mode
-            if print_flags: print('yaw_mode = True')
-            if print_flags: print('above_object = False')
-            if print_flags: print('moving_to_set_alt = False')
+            if print_flags: print('yaw_mode = True | above_object = False | moving_to_set_alt = False')
             OPT_COMPUTE_FLAG = False
             if forward_scan_option:
                 # turn this initial mode back on
@@ -521,8 +552,8 @@ def dofeedbackcontrol():
                     if print_stat: print('Hybrid mode: Approach phase')
                     if pitchcommand > pitch_thresh and alt > alt_min:
                         above_object=True
-                        if print_stat: print('#-------------------ABOVE OBJECT-------------------#')
-                        if print_flags: print('above_object = True and USE_PITCH_ERROR = False')
+                        if print_stat: print('#------------------- ABOVE OBJECT -------------------#')
+                        if print_flags: print('above_object = True | USE_PITCH_ERROR = False')
                         USE_PITCH_ERROR = False # turning this off once moving downward     
                     else:
                         above_object=False
@@ -537,11 +568,12 @@ def dofeedbackcontrol():
                 #-------------------------#
 
                 if above_object and fixed_heading_option and not moving_to_set_alt: # only do this if not already moving to setpoint                    
-                    if print_flags: print("above_object = True and fixed_heading_option = True and moving_to_set_altitude = False")
+                    if print_flags: print("above_object = True | fixed_heading_option = True | moving_to_set_altitude = False")
                     fspeed_surv,hspeed_surv = survey_flow()
                     fspeed_head = fspeed_surv
                     hspeed_head = hspeed_surv
-                    if print_flags: print("moving_to_set_alt = True: reporting end of survey") 
+                    if print_flags: print("moving_to_set_alt = True") 
+                    if print_stat: print("End of survey")
                     moving_to_set_alt = True # reporting end of survey
                     fspeed = hspeed = vspeed = 0
                     continue
@@ -581,10 +613,9 @@ def dofeedbackcontrol():
                     if print_stat: print(f'above_object = False and yawrate: {yawrate}')
             else:
                 pass
-        #elif time_lastbox != None and (rospy.Time.now() - time_lastbox > rospy.Duration(0.5)) and moving_to_set_alt:
         elif moving_to_set_alt and not sample_along_heading:
             # if its been more than half a second without detection during descent, stop lateral movement
-            if print_flags: print("Inside : moving_to_set_alt and not sample_along_heading ...")
+            if print_stat: print("Inside : moving_to_set_alt and not sample_along_heading ...")
             if print_stat: print("Its been more than half a second without detection during descent, stopping lateral movement")
             hspeed = -(horizontalerror) * traverse_gain * 2
             fspeed = (verticalerror-0.15) * traverse_gain  # (verticalerror-0.10) to make the drone come down close to smoke source
@@ -614,16 +645,14 @@ def dofeedbackcontrol():
         if fixed_heading_option and moving_to_set_alt:
             alt_diff = alt - alt_sampling
             if debugging: alt_diff = 0
-            if print_flags: print(f'fixed_heading_option = True and moving_to_set_altitude = True')
+            if print_flags: print(f'fixed_heading_option = True | moving_to_set_altitude = True')
+
             if abs(alt_diff) < 0.5:
                 if print_stat: print(f'Reached setpoint alt at {alt} m')
                 vspeed = 0 # desired alttitude reached
                 moving_to_set_alt = False
                 sample_along_heading = True
-                if print_flags : print('moving_to_set_alt = False and sample_along_heading = True')
-                # sample_heading(-fspeed_surv,-hspeed_surv) # start sampling route
-
-                # rise_up(dz=150) # get out of smoke. previously: rise_up(dz=5); rise_up(dz=70) works fine for one-directional smoke
+                if print_flags : print('moving_to_set_alt = False | sample_along_heading = True')
             elif alt_diff < 0: # too low
                 vspeed = abs(alt_set_appr_speed) # force to be positive
                 if print_stat: print(f'Too Low ... Moving to setpoint alt at {vspeed} m/s')
@@ -633,14 +662,15 @@ def dofeedbackcontrol():
                 if print_stat: print(f'Too high ... Moving to setpoint alt at {vspeed} m/s')
 
 
-
+        #----------------------------srijan----------------------------#
         if sample_along_heading: #and not moving_to_set_alt: 
             if print_stat: print('Sample along heading test')
             forward_scan = False
             above_object = False
+            if print_flags: print('forward_scan = False | above_object = False')
             if track_sampling_time: sampling_t0 = time.time()
             sample_heading_test(-fspeed_head,-hspeed_head)
-
+        #----------------------------srijan----------------------------#
 
 
         #bound controls to ranges
@@ -651,9 +681,8 @@ def dofeedbackcontrol():
         yawrate = min(max(yawrate,-limit_yawrate),limit_yawrate)
         yawcommand = min(max(yawcommand,1000),2000)
         pitchcommand = min(max(pitchcommand,1000),2000)
-        if print_stat: print(f'after boundings: fspeed: {fspeed}, vspeed: {vspeed}, hspeed:{hspeed}')
-        if print_stat: 
-            print(f'fspeed, hspeed, vspeed: {fspeed}, {hspeed}, {vspeed}\nyawrate, yawcommand, pitchcommand: {yawrate}, {yawcommand}, {pitchcommand}')
+        if print_stat: print(f'After boundings: fspeed: {fspeed}, vspeed: {vspeed}, hspeed:{hspeed}')
+        if print_stat: print(f'fspeed, hspeed, vspeed: {fspeed}, {hspeed}, {vspeed}\nyawrate, yawcommand, pitchcommand: {yawrate}, {yawcommand}, {pitchcommand}')
 
         # horizontal motion
         if yaw_mode:
@@ -677,7 +706,6 @@ def dofeedbackcontrol():
             if print_stat: print("Publishing control cmd after", time.time() - publish_rate, "seconds")
             if print_stat: print(f'x_speed: {twistmsg.linear.x}, y_speed: {twistmsg.linear.y}, z_speed: {twistmsg.linear.z}')
             twistpub.publish(twistmsg)
-            # rcpub.publish(rcmsg)
             moveAirsimGimbal(pitchcommand, yawcommand)
             publish_rate = time.time()
 
@@ -798,7 +826,7 @@ def survey_flow():
     print('#----------------------Survey complete------------------------#')
     surveying = False
 
-
+    #------------------------------srijan--------------------------------#
     print(f'yaw: {yaw}')
     i = 0
     twistmsg.linear.x = 0
@@ -838,12 +866,21 @@ def survey_flow():
     twistmsg.linear.z = 0
     twistmsg.angular.z = 0
     twistpub.publish(twistmsg)
-
+    #------------------------------srijan--------------------------------#
 
     return fspeed_surv,hspeed_surv
 
 
+def update_kalman_filter(kf, measurement):
+    """
+    Function to update Kalman filter with a new measurement
+    """
+    kf.predict()
+    kf.update(measurement)
 
+
+
+#-------------------srijan----------------------#
 def sample_heading_test(fspeed_head,hspeed_head):
     """
     keeps fixed altitude and moves along a prescribed direction obtain from flow survey prior
@@ -858,37 +895,35 @@ def sample_heading_test(fspeed_head,hspeed_head):
     global smoketrack_pub
     global yawrate
     global print_iter
-
-    #smoketrack_pub.publish('Smoke Tracking On')
     
     sampling = True
     if print_flags: print('sampling = True')
 
     print_iter = print_iter + 1
 
-
+    #------------------------------------srijan------------------------------------#
     # moving towards the source of the smoke
     # stop motion in z-direction
     x_speed = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.2)
     y_speed = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.2)
-    z_speed = 0 # stay at that height
+    
     if (time_lastbox_smoketrack != None and (rospy.Time.now() - time_lastbox_smoketrack < rospy.Duration(.5))):
         z_angular = horizontalerror_smoketrack * (yawrate/5)
-        z_speed = verticalerror_smoketrack * (5)
+        z_speed = verticalerror_smoketrack * (3)
     else:
-        z_angular = 0
-    # if print_iter%100==0: print(f'Yaw: {yaw} | x_speed: {x_speed} | y_speed: {y_speed} | z_speed: {z_speed} | z_angular: {z_angular}')
+        print("Sampling ... Yawing using Kalman Filter Prediction", end='\r')
+        z_angular = (kf.x[0, 0]) * (yawrate/5)
+        z_speed = 0 
+ 
     twistmsg.linear.x = x_speed
     twistmsg.linear.y = y_speed
     twistmsg.linear.z = z_speed
     twistmsg.angular.z = z_angular
-    # keep moving towards the source
-    # t_log = time.time()
-    # t0 = time.time()
     moveAirsimGimbal(1000, 1500)
-    #if print_iter%100==0: print('Sampling ...')
+
     if time.time()-sampling_t0 < sampling_time:
         track_sampling_time = False
+        if print_flags: print('track_sampling_time = False')
         twistpub.publish(twistmsg)
         rcmsg.channels[7] = pitch_down #send pitch command on channel 8
         rcmsg.channels[6] = yaw_center #send yaw command on channel 7
@@ -897,10 +932,11 @@ def sample_heading_test(fspeed_head,hspeed_head):
     elif time.time()-sampling_t0 >= sampling_time:
         track_sampling_time = True
         sample_along_heading = False
+        if print_flags: print('track_sampling_time = True | sample_along_heading = False')
         print('Sampling Complete')        
-
+    #------------------------------------srijan------------------------------------#
     return
-
+#-------------------srijan----------------------#
 
 
 def save_log():
