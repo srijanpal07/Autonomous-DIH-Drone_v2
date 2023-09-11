@@ -1,3 +1,9 @@
+<<<<<<< HEAD
 [ZoneTransfer]
 ZoneId=3
 HostUrl=about:internet
+=======
+[ZoneTransfer]
+ZoneId=3
+HostUrl=about:internet
+>>>>>>> 40e18dcff4e57f4b2ebeadbd6d9750c9eb65feeb
