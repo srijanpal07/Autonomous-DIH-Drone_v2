@@ -102,7 +102,7 @@ setpoint_size_approach = 1.5 # only relevant for hybrid mode, for getting close 
 
 # optical flow parameters
 alt_flow = 3 # altitude at which to stop descent and keep constant for optical flow
-alt_sampling = 2 # 1.5 # altitude setpoint at which to do a controlled sampling based on mean flow direction
+alt_sampling = 4.5 # 1.5 # altitude setpoint at which to do a controlled sampling based on mean flow direction
 alt_min = 1 # minimum allowable altitude
 
 # gain values
@@ -627,7 +627,7 @@ def dofeedbackcontrol():
             if print_stat: print("Inside : moving_to_set_alt and not sample_along_heading ...")
             if print_stat: print("Its been more than half a second without detection during descent, stopping lateral movement")
             hspeed = -(horizontalerror) * traverse_gain * 2
-            fspeed = (verticalerror-0.20) * traverse_gain  # (verticalerror-0.10) to make the drone come down close to smoke source
+            fspeed = (verticalerror-0.18) * traverse_gain  # (verticalerror-0.10) to make the drone come down close to smoke source
             if print_stat: print(f'fspeed: {fspeed}, traverse_gain: {traverse_gain}, verticalerror: {verticalerror}') 
         elif time_lastbox != None and (rospy.Time.now() - time_lastbox > rospy.Duration(5)) and not moving_to_set_alt and not sample_along_heading: # added condition here so that even if smoke isn't seen, descent continues after survey
             # if nothing detected for 5 seconds, reset gimbal position, and if more than 10 seconds, go back to manual control from RC
