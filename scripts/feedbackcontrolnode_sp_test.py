@@ -102,7 +102,7 @@ setpoint_size_approach = 1.5 # only relevant for hybrid mode, for getting close 
 
 # optical flow parameters
 alt_flow = 3 # altitude at which to stop descent and keep constant for optical flow
-alt_sampling = 5 # 1.5 # altitude setpoint at which to do a controlled sampling based on mean flow direction
+alt_sampling = 2 # 1.5 # altitude setpoint at which to do a controlled sampling based on mean flow direction
 alt_min = 1 # minimum allowable altitude
 
 # gain values
@@ -236,6 +236,7 @@ def moveAirsimGimbal(pitchcommand, yawcommand):
     gimbal.publish(cmd)
 
 
+
 def offboard():
     # Set to OFFBOARD mode so that it uses mavros commands for navigation
     mode = SetModeRequest()
@@ -246,6 +247,7 @@ def offboard():
     resp = setm(mode)
     print(resp)
     
+
 
 def euler_from_quaternion(x, y, z, w):
         """
@@ -270,6 +272,7 @@ def euler_from_quaternion(x, y, z, w):
         return roll_x, pitch_y, yaw_z # in radians
 
 
+
 def pose_callback(pose):
     global yaw,alt, gps_x, gps_y
     q = pose.pose.orientation
@@ -280,6 +283,7 @@ def pose_callback(pose):
     gps_x = pose.pose.position.x
     gps_y = pose.pose.position.y
     if print_stat: print(f"----------------Inside pose_callback():----------------\nalt: {alt}, gps_x:{gps_x}, gps_y:{gps_y}")
+
 
 
 def state_callback(state):
@@ -300,11 +304,13 @@ def state_callback(state):
         if print_flags: print("state.mode == 'Not OFFBOARD' -> guided_mode = False")
 
 
+
 def time_callback(gpstime):
     global gps_t
     gps_t = float(gpstime.time_ref.to_sec())
     # gps_t = gps_t
     if print_stat: print(f"----------------Inside time_callback:----------------\nTime: {gps_t}")
+
 
 
 def gps_callback(gpsglobal):
@@ -315,10 +321,12 @@ def gps_callback(gpsglobal):
     if print_stat: print(f"----------------Inside gps_callback():----------------\ngps_alt: {gps_alt}, gps_long: {gps_long}, gps_alt: {gps_alt}")
     
 
+
 def rel_alt_callback(altrel):
     global gps_alt_rel
     gps_alt_rel = altrel.data # relative altitude just from GPS data
     if print_stat: print(f"----------------Inside rel_alt_callback():---------------\ngps_alt_rel: {gps_alt_rel}")
+
 
 
 def boundingbox_callback(box):
@@ -370,7 +378,7 @@ def boundingbox_callback(box):
     return
 
 
-#--------------------------srijan--------------------------#
+
 def segmentation_callback(box):
     global horizontalerror_smoketrack, verticalerror_smoketrack, sizeerror_smoketrack, horizontalerror_smoketrack_list
     global time_lastbox_smoketrack, pitchcommand, yawcommand
@@ -379,7 +387,7 @@ def segmentation_callback(box):
     global sampling
     # positive errors give right, up
     if box.bbox.center.x != -1 and box.bbox.size_x > 7000:
-        if sampling: print("Sampling ... Yawing using Segmentation data", end='\r')
+        if sampling: print("Sampling ... Yawing using Segmentation")
         time_lastbox_smoketrack = rospy.Time.now()
         bboxsize = (box.bbox.size_x + box.bbox.size_y)/2 # take the average so that a very thin, long box will still be seen as small
         
@@ -409,11 +417,11 @@ def segmentation_callback(box):
             if print_stat: print('Gimbal pitched upward moving above to get above object ... : MOVE_ABOVE is set to True')
 
     else:
-        if sampling: print("Sampling ... Yawing using Kalman Filter Prediction", end='\r')
+        if sampling: print("Sampling ... Yawing using Kalman Filter")
         horizontalerror_smoketrack = kf.x[0, 0] 
 
     return
-#--------------------------srijan--------------------------#
+
 
 
 def flow_callback(flow):
@@ -451,6 +459,7 @@ def flow_callback(flow):
     else:
         if print_stat: print("----------------Inside flow_callback():----------------\nOPT_FLOW was turned off: OPT_FLOW = False")
     return
+
 
 
 def dofeedbackcontrol():
@@ -618,7 +627,7 @@ def dofeedbackcontrol():
             if print_stat: print("Inside : moving_to_set_alt and not sample_along_heading ...")
             if print_stat: print("Its been more than half a second without detection during descent, stopping lateral movement")
             hspeed = -(horizontalerror) * traverse_gain * 2
-            fspeed = (verticalerror-0.15) * traverse_gain  # (verticalerror-0.10) to make the drone come down close to smoke source
+            fspeed = (verticalerror-0.20) * traverse_gain  # (verticalerror-0.10) to make the drone come down close to smoke source
             if print_stat: print(f'fspeed: {fspeed}, traverse_gain: {traverse_gain}, verticalerror: {verticalerror}') 
         elif time_lastbox != None and (rospy.Time.now() - time_lastbox > rospy.Duration(5)) and not moving_to_set_alt and not sample_along_heading: # added condition here so that even if smoke isn't seen, descent continues after survey
             # if nothing detected for 5 seconds, reset gimbal position, and if more than 10 seconds, go back to manual control from RC
@@ -662,7 +671,6 @@ def dofeedbackcontrol():
                 if print_stat: print(f'Too high ... Moving to setpoint alt at {vspeed} m/s')
 
 
-        #----------------------------srijan----------------------------#
         if sample_along_heading: #and not moving_to_set_alt: 
             if print_stat: print('Sample along heading test')
             forward_scan = False
@@ -670,7 +678,6 @@ def dofeedbackcontrol():
             if print_flags: print('forward_scan = False | above_object = False')
             if track_sampling_time: sampling_t0 = time.time()
             sample_heading_test(-fspeed_head,-hspeed_head)
-        #----------------------------srijan----------------------------#
 
 
         #bound controls to ranges
@@ -720,6 +727,7 @@ def dofeedbackcontrol():
         rate.sleep()
 
 
+
 def rise_up(dz = 5,vz=3):
     # simple loop to go up or down, usually to get above object
     print(f'Rising {dz}m at {vz}m/s...')
@@ -735,6 +743,7 @@ def rise_up(dz = 5,vz=3):
     twistmsg.linear.z = 0
     twistpub.publish(twistmsg)
     return
+
 
 
 def survey_flow():
@@ -871,6 +880,7 @@ def survey_flow():
     return fspeed_surv,hspeed_surv
 
 
+
 def update_kalman_filter(kf, measurement):
     """
     Function to update Kalman filter with a new measurement
@@ -880,7 +890,6 @@ def update_kalman_filter(kf, measurement):
 
 
 
-#-------------------srijan----------------------#
 def sample_heading_test(fspeed_head,hspeed_head):
     """
     keeps fixed altitude and moves along a prescribed direction obtain from flow survey prior
@@ -898,25 +907,23 @@ def sample_heading_test(fspeed_head,hspeed_head):
     
     sampling = True
     if print_flags: print('sampling = True')
+    reverse_kalman = False
 
     print_iter = print_iter + 1
 
-    #------------------------------------srijan------------------------------------#
-    # moving towards the source of the smoke
-    # stop motion in z-direction
-    x_speed = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.2)
-    y_speed = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.2)
-    
-    if (time_lastbox_smoketrack != None and (rospy.Time.now() - time_lastbox_smoketrack < rospy.Duration(.5))):
+    x_speed = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.25)
+    y_speed = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.25)
+
+    # moving away from the source of the smoke
+    if (time_lastbox_smoketrack != None and (rospy.Time.now() - time_lastbox_smoketrack < rospy.Duration(7.5))):
         z_angular = horizontalerror_smoketrack * (yawrate/5)
         z_speed = verticalerror_smoketrack * (3)
     else:
-        print("Sampling ... Yawing using Kalman Filter Prediction", end='\r')
-        z_angular = (kf.x[0, 0]) * (yawrate/5)
+        print("Sampling ... Yawing using Reverse Kalman Filter")
+        z_angular = - (kf.x[0, 0]) * (yawrate/2)
         z_speed = 0 
- 
-    twistmsg.linear.x = x_speed
-    twistmsg.linear.y = y_speed
+        reverse_kalman = True
+
     twistmsg.linear.z = z_speed
     twistmsg.angular.z = z_angular
     moveAirsimGimbal(1000, 1500)
@@ -925,8 +932,17 @@ def sample_heading_test(fspeed_head,hspeed_head):
         track_sampling_time = False
         if print_flags: print('track_sampling_time = False')
         twistpub.publish(twistmsg)
-        rcmsg.channels[7] = pitch_down #send pitch command on channel 8
-        rcmsg.channels[6] = yaw_center #send yaw command on channel 7
+        rcpub.publish(rcmsg)
+        rcpub.publish(rcmsg)
+        if not reverse_kalman:
+            x_speed = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.25)
+            y_speed = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.25)
+        else:
+            x_speed = 0
+            y_speed = 0
+        twistmsg.linear.x = x_speed
+        twistmsg.linear.y = y_speed
+        twistpub.publish(twistmsg)
         rcpub.publish(rcmsg)
         rcpub.publish(rcmsg)
     elif time.time()-sampling_t0 >= sampling_time:
@@ -934,9 +950,9 @@ def sample_heading_test(fspeed_head,hspeed_head):
         sample_along_heading = False
         if print_flags: print('track_sampling_time = True | sample_along_heading = False')
         print('Sampling Complete')        
-    #------------------------------------srijan------------------------------------#
+
     return
-#-------------------srijan----------------------#
+
 
 
 def save_log():
@@ -945,6 +961,7 @@ def save_log():
     """
     fid.write('%f,%f,%f,%f,%f,%f,%f,%f,%s,%s,%s,%s,%f,%f,%s,%f,%f,%f,%f,%f\n' % 
         (time.time(),gps_t,gps_x,gps_y,alt,gps_lat,gps_long,gps_alt_rel,str(surveying),str(sampling),str(move_up),str(above_object),pitchcommand,sizeerror,str(OPT_FLOW),flow_x,flow_y,vspeed,fspeed,hspeed))
+
 
 
 if __name__ == '__main__':
@@ -1009,4 +1026,5 @@ if __name__ == '__main__':
         dofeedbackcontrol()
     except rospy.ROSInterruptException:
         pass
+
 
