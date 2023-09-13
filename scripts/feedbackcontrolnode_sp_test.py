@@ -283,6 +283,7 @@ def pose_callback(pose):
     gps_x = pose.pose.position.x
     gps_y = pose.pose.position.y
     if print_stat: print(f"----------------Inside pose_callback():----------------\nalt: {alt}, gps_x:{gps_x}, gps_y:{gps_y}")
+    if print_stat_test: print(f'yaw: {yaw}, alt: {alt}, gps_x:{gps_x}, gps_y:{gps_y}')
 
 
 
@@ -319,6 +320,7 @@ def gps_callback(gpsglobal):
     gps_long = gpsglobal.longitude
     gps_alt = gpsglobal.altitude
     if print_stat: print(f"----------------Inside gps_callback():----------------\ngps_alt: {gps_alt}, gps_long: {gps_long}, gps_alt: {gps_alt}")
+    if print_stat_test: print(f'alt: {gps_alt}, gps_lat:{gps_lat}, gps_long:{gps_long}')
     
 
 
@@ -385,9 +387,11 @@ def segmentation_callback(box):
     global MOVE_ABOVE, OPT_FLOW
     global kf, previous_yaw_measurements
     global sampling
+    
     # positive errors give right, up
     if box.bbox.center.x != -1 and box.bbox.size_x > 7000:
-        if sampling: print("Sampling ... Yawing using Segmentation")
+        if print_stat: 
+            if sampling: print("Sampling ... Yawing using Segmentation")
         time_lastbox_smoketrack = rospy.Time.now()
         bboxsize = (box.bbox.size_x + box.bbox.size_y)/2 # take the average so that a very thin, long box will still be seen as small
         
@@ -417,7 +421,8 @@ def segmentation_callback(box):
             if print_stat: print('Gimbal pitched upward moving above to get above object ... : MOVE_ABOVE is set to True')
 
     else:
-        if sampling: print("Sampling ... Yawing using Kalman Filter")
+        if print_stat: 
+            if sampling: print("Sampling ... Yawing using Kalman Filter")
         horizontalerror_smoketrack = kf.x[0, 0] 
 
     return
@@ -919,7 +924,7 @@ def sample_heading_test(fspeed_head,hspeed_head):
         z_angular = horizontalerror_smoketrack * (yawrate/5)
         z_speed = verticalerror_smoketrack * (3)
     else:
-        print("Sampling ... Yawing using Reverse Kalman Filter")
+        if print_stat: print("Sampling ... Yawing using Reverse Kalman Filter")
         z_angular = - (kf.x[0, 0]) * (yawrate/2)
         z_speed = 0 
         reverse_kalman = True
