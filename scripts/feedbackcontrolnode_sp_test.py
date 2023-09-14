@@ -77,7 +77,7 @@ print_alt = False
 
 #-----------------------srijan----------------------------#
 print_stat = False
-print_stat_test = True
+print_stat_test = False
 print_flags = False
 print_state = True
 print_speeds = False
@@ -285,6 +285,11 @@ def pose_callback(pose):
     if print_stat: print(f"----------------Inside pose_callback():----------------\nalt: {alt}, gps_x:{gps_x}, gps_y:{gps_y}")
     if print_stat_test: print(f'yaw: {yaw}, alt: {alt}, gps_x:{gps_x}, gps_y:{gps_y}')
 
+
+
+def compass_hdg_callback(heading):
+    head = heading.data
+    print(f'Heading: {head}')
 
 
 def state_callback(state):
@@ -495,6 +500,7 @@ def dofeedbackcontrol():
     rospy.Subscriber('/mavros/global_position/rel_alt',Float64,rel_alt_callback)
     rospy.Subscriber('/flow',BoundingBox2D,flow_callback)
     rospy.Subscriber('/mavros/state',State,state_callback)
+    rospy.Subscriber('/mavros/global_position/compass_hdg',Float64,compass_hdg_callback)
     twistpub = rospy.Publisher('/mavros/setpoint_velocity/cmd_vel_unstamped', Twist, queue_size=1)
     rcpub = rospy.Publisher('/mavros/rc/override', OverrideRCIn, queue_size=1)
     gimbal = rospy.Publisher('/airsim_node/gimbal_angle_euler_cmd', GimbalAngleEulerCmd, queue_size=1)
