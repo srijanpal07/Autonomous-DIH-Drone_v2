@@ -9,6 +9,9 @@ from vision_msgs.msg import BoundingBox2D,Detection2D
 from geometry_msgs.msg import Twist, PoseStamped
 from sensor_msgs.msg import TimeReference,NavSatFix
 from mavros_msgs.msg import OverrideRCIn, State
+
+from geographic_msgs.msg import GeoPoseStamped
+
 from mavros_msgs.srv import CommandBool, CommandBoolRequest, CommandTOL, CommandTOLRequest, SetMode, SetModeRequest
 from std_msgs.msg import Float64, String
 import math
@@ -273,6 +276,25 @@ def euler_from_quaternion(x, y, z, w):
 
 
 
+def euler_to_quaternion(roll, pitch, yaw):
+    # Convert Euler angles to quaternion
+    cy = math.cos(yaw * 0.5)
+    sy = math.sin(yaw * 0.5)
+    cp = math.cos(pitch * 0.5)
+    sp = math.sin(pitch * 0.5)
+    cr = math.cos(roll * 0.5)
+    sr = math.sin(roll * 0.5)
+
+    # Calculate quaternion components
+    w = cy * cp * cr + sy * sp * sr
+    x = cy * cp * sr - sy * sp * cr
+    y = sy * cp * sr + cy * sp * cr
+    z = sy * cp * cr - cy * sp * sr
+
+    return x, y, z, w
+
+
+
 def pose_callback(pose):
     global yaw,alt, gps_x, gps_y
     q = pose.pose.orientation
@@ -289,7 +311,8 @@ def pose_callback(pose):
 
 def compass_hdg_callback(heading):
     head = heading.data
-    print(f'Heading: {head}')
+    if print_stat: print(f'Heading: {head}')
+
 
 
 def state_callback(state):
@@ -325,7 +348,7 @@ def gps_callback(gpsglobal):
     gps_long = gpsglobal.longitude
     gps_alt = gpsglobal.altitude
     if print_stat: print(f"----------------Inside gps_callback():----------------\ngps_alt: {gps_alt}, gps_long: {gps_long}, gps_alt: {gps_alt}")
-    if print_stat_test: print(f'alt: {gps_alt}, gps_lat:{gps_lat}, gps_long:{gps_long}')
+    if print_stat: print(f'alt: {gps_alt}, gps_lat:{gps_lat}, gps_long:{gps_long}')
     
 
 
@@ -472,6 +495,29 @@ def flow_callback(flow):
 
 
 
+def _build_global_setpoint2(latitude, longitude, altitude, yaw=0.0):
+    """Builds a message for the /mavros/setpoint_position/global topic
+    """
+    geo_pose_setpoint = GeoPoseStamped()
+    geo_pose_setpoint.header.stamp = rospy.Time.now()
+    geo_pose_setpoint.pose.position.latitude = latitude
+    geo_pose_setpoint.pose.position.longitude = longitude
+    geo_pose_setpoint.pose.position.altitude = altitude
+
+    
+    roll = 0.0
+    pitch = 0.0
+    q_x, q_y, q_z, q_w= euler_to_quaternion(roll, pitch, yaw)
+    geo_pose_setpoint.pose.orientation.x = q_x
+    geo_pose_setpoint.pose.orientation.y = q_y
+    geo_pose_setpoint.pose.orientation.z = q_z
+    geo_pose_setpoint.pose.orientation.w = q_w
+    
+
+    return geo_pose_setpoint
+
+
+
 def dofeedbackcontrol():
     global pitchcommand, yawcommand
     global above_object, forward_scan
@@ -502,6 +548,9 @@ def dofeedbackcontrol():
     rospy.Subscriber('/mavros/state',State,state_callback)
     rospy.Subscriber('/mavros/global_position/compass_hdg',Float64,compass_hdg_callback)
     twistpub = rospy.Publisher('/mavros/setpoint_velocity/cmd_vel_unstamped', Twist, queue_size=1)
+    
+    setpoint_global_pub = rospy.Publisher('/mavros/setpoint_position/global', GeoPoseStamped, queue_size=1)
+    
     rcpub = rospy.Publisher('/mavros/rc/override', OverrideRCIn, queue_size=1)
     gimbal = rospy.Publisher('/airsim_node/gimbal_angle_euler_cmd', GimbalAngleEulerCmd, queue_size=1)
     smoketrack_pub = rospy.Publisher('/smoketrack', String, queue_size=1)
@@ -513,7 +562,7 @@ def dofeedbackcontrol():
 
     rate = rospy.Rate(20) # 20hz - originally 20hz
 
-
+    '''
     while not rospy.is_shutdown():
         if forward_scan_option and forward_scan:
             # in this mode, the drone will just start moving forward until it sees the smoke below it
@@ -737,7 +786,13 @@ def dofeedbackcontrol():
         
         rate.sleep()
 
+    '''
 
+    while not rospy.is_shutdown():
+        setpoint = _build_global_setpoint2(50, 44, 44) # just an example setpoint
+        setpoint_global_pub.publish(setpoint)
+        
+    
 
 def rise_up(dz = 5,vz=3):
     # simple loop to go up or down, usually to get above object
