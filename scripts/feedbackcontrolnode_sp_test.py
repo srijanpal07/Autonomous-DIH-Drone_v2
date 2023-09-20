@@ -23,6 +23,7 @@ import numpy as np
 import datetime, time
 from pathlib import Path
 from filterpy.kalman import KalmanFilter
+from geopy.distance import geodesic
 
 
 global horizontalerror, verticalerror, sizeerror
@@ -322,14 +323,15 @@ def compass_hdg_callback(heading):
     global slope_deg
 
     head = heading.data
-    if print_stat: print(f'Heading: {head}')
+    if print_stat: print(f'Heading: {head}, heading in rad: {np.deg2rad(head)}')
     dlat = math.radians(gps_lat-source_gps[0])
     dlon = math.radians(gps_long-source_gps[1])
     slope_rad = math.atan2(dlon, dlat)
     slope_deg = math.degrees(slope_rad)
-    if print_stat_test and not sample_along_heading: print(f'Heading: {head}, Slope(deg): {slope_deg}, Diff: {head - slope_deg}, Slope(rad): {slope_rad} ', end='\r')
+    if print_stat: print(f'Heading: {head}, Slope(deg): {slope_deg}, Diff: {head - slope_deg}, Slope(rad): {slope_rad} ', end='\r')
     # if sample_along_heading: 
         # smoketrack_yaw()
+
 
 
 def smoketrack_yaw():
@@ -342,7 +344,6 @@ def smoketrack_yaw():
     setpoint = _build_global_setpoint2(gps_lat, gps_long, gps_alt, yaw) # yaw = 0 is heading 90 in airsim
     setpoint_global_pub.publish(setpoint)
     if print_stat_test: print(f'smoketrack_yaw activated! Heading: {head}, Slope(deg): {slope_deg}, Diff: {head - slope_deg}')
-
 
 
 
@@ -451,7 +452,7 @@ def segmentation_callback(box):
     
     # positive errors give right, up
     if box.bbox.center.x != -1 and box.bbox.size_x > 7000:
-        if print_stat_test: 
+        if print_stat: 
             if sampling: print("Sampling ... Yawing using Segmentation")
         time_lastbox_smoketrack = rospy.Time.now()
         bboxsize = (box.bbox.size_x + box.bbox.size_y)/2 # take the average so that a very thin, long box will still be seen as small
@@ -482,7 +483,7 @@ def segmentation_callback(box):
             if print_stat: print('Gimbal pitched upward moving above to get above object ... : MOVE_ABOVE is set to True')
 
     else:
-        if print_stat_test: 
+        if print_stat: 
             if sampling: print("Sampling ... Yawing using Kalman Filter")
         horizontalerror_smoketrack = kf.x[0, 0] 
 
@@ -821,6 +822,7 @@ def dofeedbackcontrol():
             if print_flags: print('forward_scan = False | above_object = False')
             if track_sampling_time: sampling_t0 = time.time()
             sample_heading_test(-fspeed_head,-hspeed_head)
+            #sample_smoke(-fspeed, -hspeed)
 
 
         #bound controls to ranges
@@ -886,7 +888,6 @@ def dofeedbackcontrol():
     
     
     
-
 def rise_up(dz = 5,vz=3):
     # simple loop to go up or down, usually to get above object
     print(f'Rising {dz}m at {vz}m/s...')
@@ -1061,111 +1062,61 @@ def sample_heading_test(fspeed_head,hspeed_head):
     global horizontalerror, traverse_gain
     global horizontalerror_smoketrack, verticalerror_smoketrack, time_lastbox_smoketrack
     global smoketrack_pub
-    global yawrate
+    global gps_lat, gps_long, gps_alt
+    global slope_deg, head
     global print_iter
 
     sampling = True
     if print_flags: print('sampling = True')
-    reverse_kalman = False
+    #reverse_kalman = False
 
     print_iter = print_iter + 1
 
-    x_speed = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.25)
-    y_speed = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.25)
+    #x_speed = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.25)
+    #y_speed = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.25)
 
+    yawrate = head - slope_deg
     # moving away from the source of the smoke
     if (time_lastbox_smoketrack != None and (rospy.Time.now() - time_lastbox_smoketrack < rospy.Duration(7.5))):
-        z_angular = horizontalerror_smoketrack * (yawrate/5)
-        z_speed = verticalerror_smoketrack * (3)
-    else:
-        print("Sampling ... Yawing using Reverse Kalman Filter")
-        z_angular = - (kf.x[0, 0]) * (yawrate/2)
-        z_speed = 0 
-        reverse_kalman = True
-
-    twistmsg.linear.z = z_speed
-    twistmsg.angular.z = z_angular
-    moveAirsimGimbal(1000, 1500)
-    
-    if time.time()-sampling_t0 < sampling_time:
-        track_sampling_time = False
-        if print_flags: print('track_sampling_time = False')
-        twistpub.publish(twistmsg)
-        rcpub.publish(rcmsg)
-        rcpub.publish(rcmsg)
-        if not reverse_kalman:
-            x_speed = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.25)
-            y_speed = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.25)
-        else:
-            x_speed = 0
-            y_speed = 0
-        twistmsg.linear.x = x_speed
-        twistmsg.linear.y = y_speed
-        twistpub.publish(twistmsg)
-        rcpub.publish(rcmsg)
-        rcpub.publish(rcmsg)
-    elif time.time()-sampling_t0 >= sampling_time:
-        track_sampling_time = True
-        sample_along_heading = False
-        if print_flags: print('track_sampling_time = True | sample_along_heading = False')
-        print('Sampling Complete')        
-
-    return
-
-
-
-'''
-def sample_heading_test(fspeed_head,hspeed_head):
-    """
-    keeps fixed altitude and moves along a prescribed direction obtain from flow survey prior
-    """
-    global twistpub, twistmsg,rcmsg,rcpub
-    # function for setting the flow direction obtained after surveying
-    global sampling, sampling_time, sampling_t0, track_sampling_time
-    global sample_along_heading
-    global fspeed,hspeed,vspeed
-    global horizontalerror, traverse_gain
-    global horizontalerror_smoketrack, verticalerror_smoketrack, time_lastbox_smoketrack
-    global smoketrack_pub
-    global yawrate
-    global print_iter
-    
-    sampling = True
-    if print_flags: print('sampling = True')
-    reverse_kalman = False
-
-    print_iter = print_iter + 1
-
-    # start moving away from the source of the smoke
-    if (time_lastbox_smoketrack != None and (rospy.Time.now() - time_lastbox_smoketrack < rospy.Duration(7.5))):
-        fspeed_head = fspeed_head # fspeed_head determined by optical flow
-        hspeed_head = hspeed_head + horizontalerror_smoketrack * (-15) # hspeed_head determined by optical flow and horizontalerror_smoketrack is determined by the segmentation/kalman filter
-        z_speed = verticalerror_smoketrack * (3) # verticalerror_smoketrack is determined by segmentation only
-        z_angular = horizontalerror_smoketrack * (yawrate/10)
-        # z_angular = 0 # turning this off as the yaw motion is controlled by smoketrack_yaw()
-        # previously z_angular = horizontalerror_smoketrack * (yawrate/5)        
+        fspeed = fspeed_head
+        hspeed = hspeed_head - horizontalerror_smoketrack * (30)
+        
+        x_speed = (math.cos(yaw)*fspeed + math.sin(yaw)*hspeed)*(0.2)
+        y_speed = (math.sin(yaw)*fspeed - math.cos(yaw)*hspeed)*(0.2)
+        z_speed = verticalerror_smoketrack * (1.5) 
+        z_angular = (horizontalerror_smoketrack/30) # positive val z_angular clockwise
     else:
         if print_stat: print("Sampling ... Yawing using Reverse Kalman Filter")
-        hspeed_head = hspeed_head - (kf.x[0, 0]) * (5)
-        fspeed_head = fspeed_head
-        z_angular = - (kf.x[0, 0]) * (yawrate/2) # previously z_angular = - (kf.x[0, 0]) * (yawrate/2)
-        z_speed = 0 
-        reverse_kalman = True
+        fspeed = 0 #fspeed_head
+        hspeed = hspeed_head - (kf.x[0, 0]) * (10)
 
-    x_speed = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.25)
-    y_speed = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.25)
+        x_speed = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.2)
+        y_speed = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.2)
+        z_speed = 0 
+        z_angular = -(horizontalerror_smoketrack/30)
+        #reverse_kalman = True
 
     twistmsg.linear.x = x_speed
     twistmsg.linear.y = y_speed
     twistmsg.linear.z = z_speed
     twistmsg.angular.z = z_angular
     moveAirsimGimbal(1000, 1500)
-
+    
     if time.time()-sampling_t0 < sampling_time:
         track_sampling_time = False
         if print_flags: print('track_sampling_time = False')
         twistpub.publish(twistmsg)
-        #smoketrack_yaw()
+        rcpub.publish(rcmsg)
+        rcpub.publish(rcmsg)
+        '''
+        if not reverse_kalman:
+            x_speed = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.25)
+            y_speed = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.25)
+        else:
+            x_speed = 0
+            y_speed = 0
+        '''
+        twistpub.publish(twistmsg)
         rcpub.publish(rcmsg)
         rcpub.publish(rcmsg)
     elif time.time()-sampling_t0 >= sampling_time:
@@ -1175,8 +1126,370 @@ def sample_heading_test(fspeed_head,hspeed_head):
         print('Sampling Complete')        
 
     return
-    '''
 
+
+
+# Function to convert longitude and latitude to Cartesian coordinates
+def llh_to_ecef(lon, lat, alt):
+    lon_rad = np.radians(lon)
+    lat_rad = np.radians(lat)
+    earth_radius = 6371000.0
+    x = (earth_radius + alt) * np.cos(lat_rad) * np.cos(lon_rad)
+    y = (earth_radius + alt) * np.cos(lat_rad) * np.sin(lon_rad)
+    z = (earth_radius + alt) * np.sin(lat_rad)
+    return x, y, z
+
+
+
+# Function to convert heading angle to a 2D unit vector
+def heading_to_unit_vector(heading_deg):
+    heading_rad = np.radians(heading_deg)
+    return np.array([np.cos(heading_rad), np.sin(heading_rad), 0])
+
+
+
+def sample_smoke(fspeed_head, hspeed_head):
+    global source_gps
+    global gps_lat, gps_long, gps_alt
+    global horizontalerror_smoketrack
+    global twistpub, twistmsg,rcmsg,rcpub
+    global sampling, sampling_time, sampling_t0, track_sampling_time
+    global sample_along_heading
+    #global fspeed,hspeed,vspeed
+
+    if (time_lastbox_smoketrack != None and (rospy.Time.now() - time_lastbox_smoketrack < rospy.Duration(7.5))):
+        fspeed_head = (fspeed_head)
+        hspeed_head = hspeed_head + (horizontalerror_smoketrack*0.5)
+
+        # Define the fixed point's GPS coordinates (adjust these values)
+        fixed_point_lat = source_gps[0]  # Fixed point's latitude
+        fixed_point_long = source_gps[1]  # Fixed point's longitude
+        fixed_point_alt = gps_alt  # Fixed point's altitude in meters
+
+        # Define forward linear velocity and angular velocity (adjust these values)
+        forward_x_vel = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.2)  # m/s
+        forward_y_vel = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.2)
+
+        # Get the current drone GPS coordinates
+        # Convert the drone's and fixed point's GPS coordinates to Cartesian coordinates
+        drone_coords = (gps_lat, gps_long, gps_alt)
+        fixed_point_coords = (fixed_point_lat, fixed_point_long, fixed_point_alt)
+
+        # Calculate the desired linear velocity vector (away from fixed point)
+        desired_forward_velocity = [forward_x_vel, forward_y_vel, 0.0]
+        magnitude = 5 #/ (abs(vector_to_fixed_point[0]) + abs(vector_to_fixed_point[1]))
+        desired_forward_velocity = [magnitude * v for v in desired_forward_velocity]
+
+        drone_cartesian = geodesic(fixed_point_coords, drone_coords).destination(point=drone_coords, bearing=0)
+        fixed_point_cartesian = (0.0, 0.0, 0.0)  # Fixed point is at the origin in this coordinate system
+
+        # Calculate the position vector from drone to fixed point in Cartesian coordinates
+        vector_to_fixed_point = [fixed_point_cartesian[0] - drone_cartesian[0], fixed_point_cartesian[1] - drone_cartesian[1], fixed_point_cartesian[2] - drone_cartesian[2]]
+
+        vector_perp2plane = [0.0, 0.0, 0.1]
+        vector_tang2vec2fixedpoint = np.cross(vector_perp2plane, vector_to_fixed_point)
+        magnitude_tang = 1 #horizontal_velocity
+        desired_tangential_velocity = [magnitude_tang * vtang for vtang in vector_tang2vec2fixedpoint]
+
+        total_linear_vel  = desired_forward_velocity + desired_tangential_velocity
+
+        # Get the current drone GPS coordinates
+        # Convert the drone's and fixed point's GPS coordinates to Cartesian coordinates
+        drone_coords = (gps_lat, gps_long, gps_alt)
+        fixed_point_coords = (fixed_point_lat, fixed_point_long, fixed_point_alt)
+
+        #angle_between_vectors_rad = np.arctan2(vect2[1], vect2[0]) - np.arctan2(vect1[1], vect1[0])
+        drone_head = head 
+        vector_head = calculate_heading(fixed_point_lat, fixed_point_long, drone_coords[0], drone_coords[1])
+        angle_between_vectors_deg = drone_head - vector_head
+
+        # Create a Twist message and set linear and angular velocities
+        print(f'Kalman: ({total_linear_vel[0]}, {total_linear_vel[1]}), {yaw}, {(angle_between_vectors_deg)}')
+        twistmsg.linear.x = total_linear_vel[0] 
+        twistmsg.linear.y = total_linear_vel[1]
+        twistmsg.linear.z = 0 #desired_linear_velocity[2]
+        twistmsg.angular.x = 0
+        twistmsg.angular.y = 0
+        if angle_between_vectors_deg is not None: 
+            twistmsg.angular.z = (angle_between_vectors_deg) * (0.0005)
+        else:
+            twistmsg.angular.z = 0
+    else:
+        fspeed_head = 0
+        hspeed_head = hspeed_head + (-kf.x[0, 0])
+
+        # Define the fixed point's GPS coordinates (adjust these values)
+        fixed_point_lat = source_gps[0]  # Fixed point's latitude
+        fixed_point_long = source_gps[1]  # Fixed point's longitude
+        fixed_point_alt = gps_alt  # Fixed point's altitude in meters
+
+        # Define forward linear velocity and angular velocity (adjust these values)
+        forward_x_vel = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.3)  # m/s
+        forward_y_vel = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.3)
+
+        # Get the current drone GPS coordinates
+        # Convert the drone's and fixed point's GPS coordinates to Cartesian coordinates
+        drone_coords = (gps_lat, gps_long, gps_alt)
+        fixed_point_coords = (fixed_point_lat, fixed_point_long, fixed_point_alt)
+
+        # Calculate the desired linear velocity vector (away from fixed point)
+        desired_forward_velocity = [forward_x_vel, forward_y_vel, 0.0]
+        magnitude = 5 #/ (abs(vector_to_fixed_point[0]) + abs(vector_to_fixed_point[1]))
+        desired_forward_velocity = [magnitude * v for v in desired_forward_velocity]
+
+        drone_cartesian = geodesic(fixed_point_coords, drone_coords).destination(point=drone_coords, bearing=0)
+        fixed_point_cartesian = (0.0, 0.0, 0.0)  # Fixed point is at the origin in this coordinate system
+
+        # Calculate the position vector from drone to fixed point in Cartesian coordinates
+        vector_to_fixed_point = [fixed_point_cartesian[0] - drone_cartesian[0], fixed_point_cartesian[1] - drone_cartesian[1], fixed_point_cartesian[2] - drone_cartesian[2]]
+
+        vector_perp2plane = [0.0, 0.0, 0.1]
+        vector_tang2vec2fixedpoint = np.cross(vector_perp2plane, vector_to_fixed_point)
+        magnitude_tang = 1 #horizontal_velocity
+        desired_tangential_velocity = [magnitude_tang * vtang for vtang in vector_tang2vec2fixedpoint]
+
+        total_linear_vel  = desired_forward_velocity + desired_tangential_velocity
+
+
+
+        #angle_between_vectors_rad = np.arctan2(vect2[1], vect2[0]) - np.arctan2(vect1[1], vect1[0])
+        drone_head = head 
+        vector_head = calculate_heading(fixed_point_coords[0], fixed_point_coords[1], drone_coords[0], drone_coords[1])
+        angle_between_vectors_deg = vector_head - drone_head
+
+        print(f'R. Kalman: ({total_linear_vel[0]}, {total_linear_vel[1]}), {yaw}, {angle_between_vectors_deg}')
+        twistmsg.linear.x = total_linear_vel[0] 
+        twistmsg.linear.y = total_linear_vel[1] 
+        twistmsg.linear.z = 0 #desired_linear_velocity[2]
+        twistmsg.angular.x = 0
+        twistmsg.angular.y = 0
+        if angle_between_vectors_deg is not None: 
+            twistmsg.angular.z = (angle_between_vectors_deg) * (-0.01)
+        else:
+            twistmsg.angular.z = 0
+
+
+    if time.time()-sampling_t0 < sampling_time:
+        track_sampling_time = False
+        if print_flags: print('track_sampling_time = False')
+        # Publish the Twist message to control the drone
+        print(f'')
+        twistpub.publish(twistmsg)
+        rcpub.publish(rcmsg)
+        rcpub.publish(rcmsg)
+    elif time.time()-sampling_t0 >= sampling_time:
+        track_sampling_time = True
+        sample_along_heading = False
+        if print_flags: print('track_sampling_time = True | sample_along_heading = False')
+        print('Sampling Complete')
+
+
+    moveAirsimGimbal(1000, 1500)
+    return
+
+
+
+def calculate_heading(lat1, lon1, lat2, lon2):
+    # Convert latitude and longitude from degrees to radians
+    lat1 = math.radians(lat1)
+    lon1 = math.radians(lon1)
+    lat2 = math.radians(lat2)
+    lon2 = math.radians(lon2)
+
+    # Calculate the difference in longitudes
+    delta_lon = lon2 - lon1
+
+    # Calculate the heading angle (bearing)
+    y = math.sin(delta_lon) * math.cos(lat2)
+    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(delta_lon)
+    heading_rad = math.atan2(y, x)
+
+    # Convert the heading angle from radians to degrees
+    heading_deg = math.degrees(heading_rad)
+
+    # Ensure the heading angle is in the range [0, 360)
+    heading_deg = (heading_deg + 360) % 360
+
+    return heading_deg
+
+
+
+
+'''
+def sample_smoke2(fspeed_head, hspeed_head):
+    global source_gps
+    global gps_lat, gps_long, gps_alt
+    global horizontalerror_smoketrack
+    global twistpub, twistmsg,rcmsg,rcpub
+    global sampling, sampling_time, sampling_t0, track_sampling_time
+    global sample_along_heading
+    #global fspeed,hspeed,vspeed
+
+    if (time_lastbox_smoketrack != None and (rospy.Time.now() - time_lastbox_smoketrack < rospy.Duration(7.5))):
+        hspeed_head = hspeed_head - (horizontalerror_smoketrack)
+
+        # Define the fixed point's GPS coordinates (adjust these values)
+        fixed_point_lat = source_gps[0]  # Fixed point's latitude
+        fixed_point_long = source_gps[1]  # Fixed point's longitude
+        fixed_point_alt = gps_alt  # Fixed point's altitude in meters
+
+        # Define forward linear velocity and angular velocity (adjust these values)
+        forward_x_vel = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.25)  # m/s
+        forward_y_vel = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.25)
+        angular_velocity = 0.001 # horizontalerror_smoketrack / 10  # rad/s
+
+
+        # Get the current drone GPS coordinates
+
+        # Convert the drone's and fixed point's GPS coordinates to Cartesian coordinates
+        drone_coords = (gps_lat, gps_long, gps_alt)
+        fixed_point_coords = (fixed_point_lat, fixed_point_long, fixed_point_alt)
+
+        drone_cartesian = geodesic(fixed_point_coords, drone_coords).destination(point=drone_coords, bearing=0)
+        fixed_point_cartesian = (0.0, 0.0, 0.0)  # Fixed point is at the origin in this coordinate system
+
+        # Calculate the position vector from drone to fixed point in Cartesian coordinates
+        vector_to_fixed_point = [fixed_point_cartesian[0] - drone_cartesian[0], fixed_point_cartesian[1] - drone_cartesian[1], fixed_point_cartesian[2] - drone_cartesian[2]]
+
+        # Calculate the desired linear velocity vector (away from fixed point)
+        desired_forward_velocity = [forward_x_vel, forward_y_vel, 0.0]
+        magnitude = 5 #/ (abs(vector_to_fixed_point[0]) + abs(vector_to_fixed_point[1]))
+        desired_forward_velocity = [magnitude * v for v in desired_forward_velocity]
+
+        vector_perp2plane = [0.0, 0.0, 0.1]
+        vector_tang2vec2fixedpoint = np.cross(vector_perp2plane, vector_to_fixed_point)
+        magnitude_tang = 1 #horizontal_velocity
+        desired_tangential_velocity = [magnitude_tang * vtang for vtang in vector_tang2vec2fixedpoint]
+
+        total_linear_vel  = desired_forward_velocity + desired_tangential_velocity
+        # Calculate the desired angular velocity to rotate around the fixed point
+
+        # Convert the two points and the drone's position to ECEF coordinates
+        source_ecef = llh_to_ecef(source_gps[1], source_gps[0], 0.0)
+        drone_ecef = llh_to_ecef(gps_long, gps_lat, 0.0)
+
+        # Calculate vectors from one point to the other and from drone's position to one of the points
+        vector_from_source_to_drone = np.array(drone_ecef) - np.array(source_ecef)
+
+        # Convert drone's heading to a 2D unit vector
+        drone_heading_vector = heading_to_unit_vector(yaw) #heading_to_unit_vector(head)
+
+        # Normalize the vectors
+        vector_from_source_to_drone_normalized = vector_from_source_to_drone / np.linalg.norm(vector_from_source_to_drone)
+        drone_heading_vector_normalized = drone_heading_vector / np.linalg.norm(drone_heading_vector)
+
+        # Calculate the angles (in degrees) between the vectors
+        #angle_between_vectors_rad = np.arccos(np.dot(vector_from_source_to_drone_normalized, drone_heading_vector_normalized))
+        #angle_between_vectors_deg = np.rad2deg(angle_between_vectors_rad)
+        vect2 = vector_from_source_to_drone_normalized
+        vect1 = drone_heading_vector_normalized
+        angle_between_vectors_rad = np.arctan2(vect2[1], vect2[0]) - np.arctan2(vect1[1], vect1[0])
+        angle_between_vectors_deg = np.rad2deg(angle_between_vectors_rad)
+
+        # Create a Twist message and set linear and angular velocities
+        print(f'Kalman: ({total_linear_vel[0]}, {total_linear_vel[1]}), {yaw}, {(angle_between_vectors_deg)}')
+        twistmsg.linear.x = total_linear_vel[0] * 0.1
+        twistmsg.linear.y = total_linear_vel[1] * 0.1
+        twistmsg.linear.z = 0 #desired_linear_velocity[2]
+        twistmsg.angular.x = 0
+        twistmsg.angular.y = 0
+        if angle_between_vectors_deg is not None: 
+            twistmsg.angular.z = (angle_between_vectors_deg) * (-0.0005)
+        else:
+            twistmsg.angular.z = 0
+    else:
+        fspeed_head = 0
+        hspeed_head = hspeed_head + (horizontalerror_smoketrack)
+
+        # Define the fixed point's GPS coordinates (adjust these values)
+        fixed_point_lat = source_gps[0]  # Fixed point's latitude
+        fixed_point_long = source_gps[1]  # Fixed point's longitude
+        fixed_point_alt = gps_alt  # Fixed point's altitude in meters
+
+        # Define forward linear velocity and angular velocity (adjust these values)
+        forward_x_vel = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.25)  # m/s
+        forward_y_vel = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.25)
+        angular_velocity = 0.001 # horizontalerror_smoketrack / 10  # rad/s
+
+
+        # Get the current drone GPS coordinates
+
+        # Convert the drone's and fixed point's GPS coordinates to Cartesian coordinates
+        drone_coords = (gps_lat, gps_long, gps_alt)
+        fixed_point_coords = (fixed_point_lat, fixed_point_long, fixed_point_alt)
+
+        drone_cartesian = geodesic(fixed_point_coords, drone_coords).destination(point=drone_coords, bearing=0)
+        fixed_point_cartesian = (0.0, 0.0, 0.0)  # Fixed point is at the origin in this coordinate system
+
+        # Calculate the position vector from drone to fixed point in Cartesian coordinates
+        vector_to_fixed_point = [fixed_point_cartesian[0] - drone_cartesian[0], fixed_point_cartesian[1] - drone_cartesian[1], fixed_point_cartesian[2] - drone_cartesian[2]]
+
+        # Calculate the desired linear velocity vector (away from fixed point)
+        desired_forward_velocity = [forward_x_vel, forward_y_vel, 0.0]
+        magnitude = 5 #/ (abs(vector_to_fixed_point[0]) + abs(vector_to_fixed_point[1]))
+        desired_forward_velocity = [magnitude * v for v in desired_forward_velocity]
+
+        vector_perp2plane = [0.0, 0.0, 0.1]
+        vector_tang2vec2fixedpoint = np.cross(vector_perp2plane, vector_to_fixed_point)
+        magnitude_tang = 1 #horizontal_velocity
+        desired_tangential_velocity = [magnitude_tang * vtang for vtang in vector_tang2vec2fixedpoint]
+
+        total_linear_vel  = desired_forward_velocity + desired_tangential_velocity
+        # Calculate the desired angular velocity to rotate around the fixed point
+
+        # Convert the two points and the drone's position to ECEF coordinates
+        source_ecef = llh_to_ecef(source_gps[1], source_gps[0], 0.0)
+        drone_ecef = llh_to_ecef(gps_long, gps_lat, 0.0)
+
+        # Calculate vectors from one point to the other and from drone's position to one of the points
+        vector_from_source_to_drone = np.array(drone_ecef) - np.array(source_ecef)
+
+        # Convert drone's heading to a 3D unit vector
+        drone_heading_vector = heading_to_unit_vector(yaw) #heading_to_unit_vector(head)
+
+        # Normalize the vectors
+        vector_from_source_to_drone_normalized = vector_from_source_to_drone / np.linalg.norm(vector_from_source_to_drone)
+        drone_heading_vector_normalized = drone_heading_vector / np.linalg.norm(drone_heading_vector)
+
+        # Calculate the angles (in degrees) between the vectors
+        #angle_between_vectors_rad = np.arccos(np.dot(vector_from_source_to_drone_normalized, drone_heading_vector_normalized))
+        #angle_between_vectors_deg = np.rad2deg(angle_between_vectors_rad)
+
+        vect2 = vector_from_source_to_drone_normalized
+        vect1 = drone_heading_vector_normalized
+        angle_between_vectors_rad = np.arctan2(vect2[1], vect2[0]) - np.arctan2(vect1[1], vect1[0])
+        angle_between_vectors_deg = np.rad2deg(angle_between_vectors_rad)
+
+        print(f'R. Kalman: ({total_linear_vel[0]}, {total_linear_vel[1]}), {yaw}, {angle_between_vectors_deg}')
+        twistmsg.linear.x = total_linear_vel[0] 
+        twistmsg.linear.y = - total_linear_vel[1] 
+        twistmsg.linear.z = 0 #desired_linear_velocity[2]
+        twistmsg.angular.x = 0
+        twistmsg.angular.y = 0
+        if angle_between_vectors_deg is not None: 
+            twistmsg.angular.z = (angle_between_vectors_deg) * (-0.0005)
+        else:
+            twistmsg.angular.z = 0
+
+
+    if time.time()-sampling_t0 < sampling_time:
+        track_sampling_time = False
+        if print_flags: print('track_sampling_time = False')
+        # Publish the Twist message to control the drone
+        print(f'')
+        twistpub.publish(twistmsg)
+        rcpub.publish(rcmsg)
+        rcpub.publish(rcmsg)
+    elif time.time()-sampling_t0 >= sampling_time:
+        track_sampling_time = True
+        sample_along_heading = False
+        if print_flags: print('track_sampling_time = True | sample_along_heading = False')
+        print('Sampling Complete')
+
+
+    moveAirsimGimbal(1000, 1500)
+    return
+'''
 
 def save_log():
     """
@@ -1184,7 +1497,7 @@ def save_log():
     """
     fid.write('%f,%f,%f,%f,%f,%f,%f,%f,%s,%s,%s,%s,%f,%f,%s,%f,%f,%f,%f,%f\n' % 
         (time.time(),gps_t,gps_x,gps_y,alt,gps_lat,gps_long,gps_alt_rel,str(surveying),str(sampling),str(move_up),str(above_object),pitchcommand,sizeerror,str(OPT_FLOW),flow_x,flow_y,vspeed,fspeed,hspeed))
-
+    
 
 
 if __name__ == '__main__':
