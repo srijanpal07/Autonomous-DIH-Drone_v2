@@ -17,6 +17,7 @@ import argparse
 from pathlib import Path
 import time
 import torch
+import imageio
 # import torch_tensorrt
 print(f"Torch setup complete. Using torch {torch.__version__} ({torch.cuda.get_device_properties(0).name if torch.cuda.is_available() else 'CPU'})")
 
@@ -29,8 +30,8 @@ conf_thres=0.4  # confidence threshold
 iou_thres=0.45  # NMS IOU threshold
 
 VIEW_IMG=True
-SAVE_IMG = False # Originally False
-save_format = '.avi' # originally'.avi'
+SAVE_IMG = True # Originally False
+save_format = '.jpg' # originally'.avi'
 #-----------------------------------------------------#
 gps_t = 0
 # create saving directory
@@ -75,9 +76,9 @@ global imgsz, model, device, names
 # labeling text on image
 BLACK = (265,265,265)
 font = cv2.FONT_HERSHEY_SIMPLEX
-font_size = 1
+font_size = 0.5
 font_color = BLACK
-font_thickness = 2
+font_thickness = 1
 
 def imagecallback(img):
     # print("imagecallback()")
@@ -129,7 +130,7 @@ def imagecallback(img):
             box.bbox.size_x = -1
             box.bbox.size_y = -1
         pub.publish(box)
-        text_to_image = 'processed'
+        text_to_image = 'Processed'
         # print('Time after running detection')
         # print('Image %d' % box.source_img.header.seq)
         # print(box.source_img.header.stamp)
@@ -158,10 +159,13 @@ def imagecallback(img):
         elif save_format == '.avi':
             video.write(img_numpy)
         else:
-            cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum),img_numpy))
+            img_bgr = cv2.cvtColor(img_numpy, cv2.COLOR_RGB2BGR)
+            imageio.imsave(savedir.joinpath('Detection-%06.0f.jpg' % savenum), img_bgr)
+            #cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum),img_numpy))
     if VIEW_IMG:
         # im_with_boxes = annotator.result()
         # cv2.imshow('Detection', img_numpy)
+        '''
         result = img_numpy
         scale_percent = 25 # percent of original size
         width = int(result.shape[1] * scale_percent / 100)
@@ -171,6 +175,8 @@ def imagecallback(img):
         # resize image
         resized = cv2.resize(result, dim, interpolation = cv2.INTER_AREA)
         cv2.imshow('Detection',resized)
+        '''
+        cv2.imshow('Detection',img_numpy)
         cv2.waitKey(1)  # 1 millisecond
     # print('Rest of callback function took',1e3*(time.time()-t1))
     # print('Entire callback took',1e3*(time.time() - time_stamp))
