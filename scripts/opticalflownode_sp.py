@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3.10 
+#!/usr/bin/python3 
 # # license removed for brevity
 import cv2 as cv
 import numpy as np
