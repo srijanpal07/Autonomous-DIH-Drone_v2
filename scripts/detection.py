@@ -161,10 +161,7 @@ def imagecallback(img):
         else:
             img_bgr = cv2.cvtColor(img_numpy, cv2.COLOR_RGB2BGR)
             imageio.imsave(savedir.joinpath('Detection-%06.0f.jpg' % savenum), img_bgr)
-            #cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum),img_numpy))
     if VIEW_IMG:
-        # im_with_boxes = annotator.result()
-        # cv2.imshow('Detection', img_numpy)
         '''
         result = img_numpy
         scale_percent = 25 # percent of original size
@@ -178,9 +175,7 @@ def imagecallback(img):
         '''
         cv2.imshow('Detection',img_numpy)
         cv2.waitKey(1)  # 1 millisecond
-    # print('Rest of callback function took',1e3*(time.time()-t1))
-    # print('Entire callback took',1e3*(time.time() - time_stamp))
-    # print('Detection fps ~',1/(time.time() - time_stamp))
+
 
 
 def time_callback(gpstime):
