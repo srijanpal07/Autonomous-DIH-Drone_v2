@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3.10 
+#!/usr/bin/python3 
 # license removed for brevity
 from operator import truediv
 from re import sub
@@ -38,7 +38,8 @@ gps_t = 0
 tmp = datetime.datetime.now()
 stamp = ("%02d-%02d-%02d" % 
     (tmp.year, tmp.month, tmp.day))
-maindir = Path('./SavedData')
+maindir = Path('/media/swarm1/gaia1/Data/autonomousdihdrone_v2')
+#maindir = Path('./SavedData')
 runs_today = list(maindir.glob('*%s*_detection' % stamp))
 if runs_today:
     runs_today = [str(name) for name in runs_today]
@@ -94,7 +95,7 @@ def imagecallback(img):
     img_numpy = np.frombuffer(img.data,dtype=np.uint8).reshape(img.height,img.width,-1)
 
     if rospy.Time.now() - img.header.stamp > rospy.Duration(max_delay):
-        print("DetectionNode: dropping old image from detection\n")
+        print("DetectionNode: dropping old image from detection", end='\r')
         # text_to_image = 'skipped'
         return
     else:
@@ -176,6 +177,10 @@ def imagecallback(img):
     # print('Detection fps ~',1/(time.time() - time_stamp))
 
 
+def time_callback(gpstime):
+    global gps_t
+    gps_t = float(gpstime.time_ref.to_sec())
+
 def init_detection_node():
     global pub,box,video,timelog
     pub = rospy.Publisher('/bounding_box', Detection2D, queue_size=1)
@@ -219,8 +224,9 @@ def init_detection_node():
 
     # initializing node
     rospy.init_node('detectionnode', anonymous=False)
-    rospy.Subscriber('front_centre_cam', Image, imagecallback)
-    # rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
+    #rospy.Subscriber('front_centre_cam', Image, imagecallback)
+    rospy.Subscriber('/camera/image', Image, imagecallback)
+    rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
     
 
     rospy.spin()
