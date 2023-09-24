@@ -1,9 +1,10 @@
-#!/usr/local/bin/python3.10 
+#!/usr/bin/python3 
 # license removed for brevity
+
 from ast import And
 from pickle import TRUE
-import airsim
-from airsim_ros_pkgs.msg import GimbalAngleEulerCmd, GPSYaw
+#import airsim
+#from airsim_ros_pkgs.msg import GimbalAngleEulerCmd, GPSYaw
 import rospy
 from vision_msgs.msg import BoundingBox2D,Detection2D
 from geometry_msgs.msg import Twist, PoseStamped, TwistStamped
@@ -61,7 +62,8 @@ tmp = datetime.datetime.now()
 stamp = ("%02d-%02d-%02d" % 
     (tmp.year, tmp.month, tmp.day))
 # maindir = Path('/home/%s/1FeedbackControl' % username)
-maindir = Path('./SavedData')
+# maindir = Path('./SavedData')
+maindir = Path('/media/swarm1/gaia1/Data/autonomousdihdrone_v2')
 runs_today = list(maindir.glob('*%s*_fc-data' % stamp))
 if runs_today:
     runs_today = [str(name) for name in runs_today]
@@ -215,15 +217,14 @@ kf.P *= 100.0  # Initial covariance matrix
 
 # --------------------- Kalman Filter Initialization --------------------- #
 
-
-
+'''
 def moveAirsimGimbal(pitchcommand, yawcommand):
     '''
-    Converts gimbal's pwm commands to angles for running is simulation
-    pitchcommand - Pitch PWM. 1000 is straight ahead (0 deg) and 1900 is straight down (-90 deg) 
-    yawcommand - Yaw PWM. 1000 is -45 deg and 2000 is 45 deg
+    # Converts gimbal's pwm commands to angles for running is simulation
+    # pitchcommand - Pitch PWM. 1000 is straight ahead (0 deg) and 1900 is straight down (-90 deg) 
+    # yawcommand - Yaw PWM. 1000 is -45 deg and 2000 is 45 deg
 
-    '''
+'''
     if print_stat: print(f'-------------------Inside moveAirsimGimbal()-------------------\npithchcommand: {pitchcommand}, yawcommand: {yawcommand}')
     global gimbal, airsim_yaw, yaw
     airsim_yaw = math.degrees(yaw)
@@ -245,13 +246,14 @@ def moveAirsimGimbal(pitchcommand, yawcommand):
     # print("Cam Angle= ", cmd.yaw, ", Gimbal Pitch = ", cmd.pitch, "AirsimYaw =", airsim_yaw, "Gimbal Yaw =", gimbal_yaw)
     gimbal.publish(cmd)
 
-
+'''
 
 def offboard():
     # Set to OFFBOARD mode so that it uses mavros commands for navigation
     mode = SetModeRequest()
     mode.base_mode = 0
     mode.custom_mode = "OFFBOARD"
+    print("GOING AUTONOMOUS")
     print("Setting up...", end ="->")
     setm = rospy.ServiceProxy('/mavros/set_mode', SetMode)
     resp = setm(mode)
@@ -431,7 +433,7 @@ def boundingbox_callback(box):
             yawcommand = min(max(yawcommand,1000),2000)
             '''
 
-            if print_stat: print(f"Changed pitchcommand,delta: {round(pitchcommand, 5)},{round(pitchdelta, 5)}  changed yawcommand, delta: {round(yawcommand, 5)},{round(yawdelta, 5)}")
+            #if print_stat: print(f"Changed pitchcommand,delta: {round(pitchcommand, 5)},{round(pitchdelta, 5)}  changed yawcommand, delta: {round(yawcommand, 5)},{round(yawdelta, 5)}")
 
         if pitchcommand < pitch_thresh and bboxsize > 0.75: # if close and gimbal pitched upward, move to get above the object
             MOVE_ABOVE = True
@@ -632,7 +634,7 @@ def dofeedbackcontrol():
     # setpoint_attitude_pub = rospy.Publisher('/mavros/setpoint_attitude/cmd_vel', TwistStamped, queue_size=1)
 
     rcpub = rospy.Publisher('/mavros/rc/override', OverrideRCIn, queue_size=1)
-    gimbal = rospy.Publisher('/airsim_node/gimbal_angle_euler_cmd', GimbalAngleEulerCmd, queue_size=1)
+    # gimbal = rospy.Publisher('/airsim_node/gimbal_angle_euler_cmd', GimbalAngleEulerCmd, queue_size=1)
     smoketrack_pub = rospy.Publisher('/smoketrack', String, queue_size=1)
 
     # control loop
@@ -858,7 +860,10 @@ def dofeedbackcontrol():
             if print_stat: print("Publishing control cmd after", time.time() - publish_rate, "seconds")
             if print_stat: print(f'x_speed: {twistmsg.linear.x}, y_speed: {twistmsg.linear.y}, z_speed: {twistmsg.linear.z}')
             twistpub.publish(twistmsg)
-            moveAirsimGimbal(pitchcommand, yawcommand)
+            #moveAirsimGimbal(pitchcommand, yawcommand)
+            rcmsg.channels[7] = pitchcommand #send pitch command on channel 8
+            rcmsg.channels[6] = yawcommand #send yaw command on channel 7
+            rcpub.publish(rcmsg)
             publish_rate = time.time()
 
         if print_pitch: print('Pitch command: %f' % (pitchcommand))
@@ -1100,7 +1105,10 @@ def sample_heading_test(fspeed_head,hspeed_head):
     twistmsg.linear.y = y_speed
     twistmsg.linear.z = z_speed
     twistmsg.angular.z = z_angular
-    moveAirsimGimbal(1000, 1500)
+    #moveAirsimGimbal(1000, 1500)
+    rcmsg.channels[7] = 1000 #send pitch command on channel 8
+    rcmsg.channels[6] = 1500 #send yaw command on channel 7
+    rcpub.publish(rcmsg)
     
     if time.time()-sampling_t0 < sampling_time:
         track_sampling_time = False
@@ -1284,7 +1292,11 @@ def sample_smoke(fspeed_head, hspeed_head):
         print('Sampling Complete')
 
 
-    moveAirsimGimbal(1000, 1500)
+    #moveAirsimGimbal(1000, 1500)
+    rcmsg.channels[7] = 1000 #send pitch command on channel 8
+    rcmsg.channels[6] = 1500 #send yaw command on channel 7
+    rcpub.publish(rcmsg)
+
     return
 
 
@@ -1505,6 +1517,7 @@ if __name__ == '__main__':
     rospy.init_node('feedbacknode', anonymous=False)
     twist_pub = rospy.Publisher('/mavros/setpoint_position/local', PoseStamped, queue_size=1)
     
+    '''
     # TAKEOFF
     takeoff = CommandTOLRequest()
     takeoff.min_pitch = 0
@@ -1557,9 +1570,10 @@ if __name__ == '__main__':
         twist_pub.publish(go)
         time.sleep(0.2)
     
-
+    
     print("GOING AUTONOMOUS")
     time.sleep(5)
+    '''
     try:
         dofeedbackcontrol()
     except rospy.ROSInterruptException:
