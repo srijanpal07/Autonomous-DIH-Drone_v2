@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3.10 
+#!/usr/bin/python3 
 # license removed for brevity
 
 from operator import truediv
@@ -51,7 +51,7 @@ view_img = True
 hide_labels=False,  # hide labels
 hide_conf=False,  # hide confidences
 VIEW_IMG=True
-VIEW_MASK=False
+VIEW_MASK=True
 SAVE_IMG = False
 save_format = False #'.avi' or '.raw'
 #-----------------------------------------------------#
@@ -63,7 +63,8 @@ gps_t = 0
 tmp = datetime.datetime.now()
 stamp = ("%02d-%02d-%02d" % 
     (tmp.year, tmp.month, tmp.day))
-maindir = Path('./SavedData')
+maindir = Path('/media/swarm1/gaia1/Data/autonomousdihdrone_v2')
+#maindir = Path('./SavedData')
 runs_today = list(maindir.glob('*%s*_segmentation' % stamp))
 if runs_today:
     runs_today = [str(name) for name in runs_today]
@@ -79,7 +80,7 @@ os.makedirs(savedir)
 
 # YOLO paths and importing
 FILE = Path(__file__).resolve()
-YOLOv5_ROOT = FILE.parents[1] / 'scripts/modules/yolov8-seg/yolo-V8'  # YOLOv5 root directory
+YOLOv5_ROOT = FILE.parents[0] / 'modules/yolo-V8'  # YOLOv5 root directory
 if str(YOLOv5_ROOT) not in sys.path:
     sys.path.append(str(YOLOv5_ROOT))  # add YOLOv5_ROOT to PATH
 # print(YOLOv5_ROOT)
@@ -213,6 +214,11 @@ def imagecallback(img):
                 cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum),img_numpy))
         
         
+def time_callback(gpstime):
+    global gps_t
+    gps_t = float(gpstime.time_ref.to_sec())
+
+
 
 def init_detection_node():
     global pub, box, video, timelog
@@ -238,7 +244,9 @@ def init_detection_node():
 
     # initializing node
     rospy.init_node('segment_smoke', anonymous=False)
-    rospy.Subscriber('front_centre_cam', Image, imagecallback)
+    rospy.Subscriber('/camera/image', Image, imagecallback)
+    rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
+    #rospy.Subscriber('front_centre_cam', Image, imagecallback)
     
     rospy.spin()
 

@@ -1,9 +1,9 @@
-#!/usr/local/bin/python3.10 
+#!/usr/bin/python3  
 # license removed for brevity
 from ast import And
 from pickle import TRUE
-import airsim
-from airsim_ros_pkgs.msg import GimbalAngleEulerCmd, GPSYaw
+#import airsim
+#from airsim_ros_pkgs.msg import GimbalAngleEulerCmd, GPSYaw
 import rospy
 from vision_msgs.msg import BoundingBox2D,Detection2D
 from geometry_msgs.msg import Twist, PoseStamped, TwistStamped
@@ -181,7 +181,7 @@ else:
 pitchcommand = pitch_init
 yawcommand = yaw_center
 #ADDED for airsim
-airsim_yaw = 0
+#airsim_yaw = 0
 publish_rate = 0
 
 
@@ -243,7 +243,7 @@ def moveAirsimGimbal(pitchcommand, yawcommand):
         cmd.yaw = cmd.yaw % 360
     
     # print("Cam Angle= ", cmd.yaw, ", Gimbal Pitch = ", cmd.pitch, "AirsimYaw =", airsim_yaw, "Gimbal Yaw =", gimbal_yaw)
-    gimbal.publish(cmd)
+    #gimbal.publish(cmd)
 
 
 
@@ -632,7 +632,7 @@ def dofeedbackcontrol():
     # setpoint_attitude_pub = rospy.Publisher('/mavros/setpoint_attitude/cmd_vel', TwistStamped, queue_size=1)
 
     rcpub = rospy.Publisher('/mavros/rc/override', OverrideRCIn, queue_size=1)
-    gimbal = rospy.Publisher('/airsim_node/gimbal_angle_euler_cmd', GimbalAngleEulerCmd, queue_size=1)
+    #gimbal = rospy.Publisher('/airsim_node/gimbal_angle_euler_cmd', GimbalAngleEulerCmd, queue_size=1)
     smoketrack_pub = rospy.Publisher('/smoketrack', String, queue_size=1)
 
     # control loop
