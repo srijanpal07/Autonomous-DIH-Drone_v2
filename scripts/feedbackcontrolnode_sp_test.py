@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3.10 
+#!/usr/bin/python3 
 # license removed for brevity
 
 from ast import And
@@ -363,7 +363,7 @@ def state_callback(state):
             print("state.mode == 'OFFBOARD' -> guided_mode = True")
             print_state = False
     else:
-        print("!!!!!!!!!!!!!!!! NOT OFFBOARD")
+        print("!!!!!!!!!!!!!!!! NOT OFFBOARD", end='\r')
         guided_mode = False
         if print_flags: print("state.mode == 'Not OFFBOARD' -> guided_mode = False")
 
@@ -634,7 +634,7 @@ def dofeedbackcontrol():
     # setpoint_attitude_pub = rospy.Publisher('/mavros/setpoint_attitude/cmd_vel', TwistStamped, queue_size=1)
 
     rcpub = rospy.Publisher('/mavros/rc/override', OverrideRCIn, queue_size=1)
-    gimbal = rospy.Publisher('/airsim_node/gimbal_angle_euler_cmd', GimbalAngleEulerCmd, queue_size=1)
+    #gimbal = rospy.Publisher('/airsim_node/gimbal_angle_euler_cmd', GimbalAngleEulerCmd, queue_size=1)
     smoketrack_pub = rospy.Publisher('/smoketrack', String, queue_size=1)
 
     # control loop

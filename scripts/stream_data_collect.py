@@ -30,7 +30,7 @@ max_delay = 0.5 # [seconds] delay between last detectiona nd current image after
 conf_thres=0.4  # confidence threshold
 iou_thres=0.45  # NMS IOU threshold
 
-VIEW_IMG=False
+VIEW_IMG= True
 SAVE_IMG = True # Originally False
 save_format = '.jpg' # originally'.avi'
 #-----------------------------------------------------#
