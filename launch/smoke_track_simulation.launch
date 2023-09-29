@@ -1,0 +1,15 @@
+<launch>
+	
+	<node name="dronecamera_node" pkg="drone_feedback" type="stream.py" output="screen"/>
+
+	<node name="detection_node" pkg="drone_feedback" type="detection.py" output="screen"/>
+
+	<node name="opticalflow_node" pkg="drone_feedback" type="opticalflownode.py" output="screen"/>
+	
+	<node name="segmentation_node" pkg="drone_feedback" type="segment_v8.py" output="screen"/>
+
+	<node name="feedbackcontrol_node" pkg="drone_feedback" type="feedbackcontrolnode_sp_test.py" output="screen"/>
+
+	
+
+</launch>

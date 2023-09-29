@@ -1,4 +1,4 @@
-#!/usr/bin/python3 
+#!/usr/local/bin/python3.10 
 # license removed for brevity
 
 from operator import truediv
@@ -18,6 +18,7 @@ import argparse
 from pathlib import Path
 import time
 import torch
+from ultralytics.utils import ops
 
 from ultralytics import YOLO
 
@@ -32,26 +33,25 @@ global imgsz, model, device, names, max_det, max_delay
 #global engine, half
 
 global threshold
-threshold = 200 # white smoke
+threshold = 218 # white smoke
 
 #------------------------OPTIONS---------------------#
 max_delay = 0.5 # [seconds] delay between last detection and current image after which to just drop images to catch up
 
-conf_thres=0.25 # originally 0.4  # confidence threshold
-iou_thres=0.45  # NMS IOU threshold
+conf_thres=0.8 #previously 0.25  # confidence threshold
+iou_thres=0.05  # NMS IOU threshold
 max_det=100 # maximum detections per image
 imgsz = (352,448) # previously [352,448] # scaled image size to run inference on #inference size (height, width) 
 device='cpu' # device='cuda:0'
-retina_masks=True
+retina_masks=False
 
 save_txt = False
 save_img = False 
 save_crop = False 
-view_img = True
 hide_labels=False,  # hide labels
 hide_conf=False,  # hide confidences
 VIEW_IMG=True
-VIEW_MASK=True
+VIEW_MASK=False
 SAVE_IMG = False
 save_format = False #'.avi' or '.raw'
 #-----------------------------------------------------#
@@ -63,8 +63,7 @@ gps_t = 0
 tmp = datetime.datetime.now()
 stamp = ("%02d-%02d-%02d" % 
     (tmp.year, tmp.month, tmp.day))
-maindir = Path('/media/swarm1/gaia1/Data/autonomousdihdrone_v2')
-#maindir = Path('./SavedData')
+maindir = Path('./SavedData')
 runs_today = list(maindir.glob('*%s*_segmentation' % stamp))
 if runs_today:
     runs_today = [str(name) for name in runs_today]
@@ -80,7 +79,7 @@ os.makedirs(savedir)
 
 # YOLO paths and importing
 FILE = Path(__file__).resolve()
-YOLOv5_ROOT = FILE.parents[0] / 'modules/yolo-V8'  # YOLOv5 root directory
+YOLOv5_ROOT = FILE.parents[1] / 'scripts/modules/yolov8-seg/yolo-V8'  # YOLOv5 root directory
 if str(YOLOv5_ROOT) not in sys.path:
     sys.path.append(str(YOLOv5_ROOT))  # add YOLOv5_ROOT to PATH
 # print(YOLOv5_ROOT)
@@ -108,17 +107,30 @@ def imagecallback(img):
         #print("DetectionNode: dropping old image from detection\n")
         return
     else:
-        results = model.predict(img_numpy, conf=conf_thres, imgsz=imgsz, iou=iou_thres, max_det=max_det, verbose=False)
+        #results = model.predict(img_numpy, show=True, conf=conf_thres, imgsz=imgsz, iou=iou_thres, max_det=max_det, verbose=False, show_conf=False, retina_masks=False)
+        results = model.predict(img_numpy, imgsz=imgsz, verbose=False, show_conf=True)
+        #results = non_max_suppression(results, conf_thres=conf_thres, iou_thres=iou_thres, classes=None, agnostic=False, max_det=max_det, max_wh=1000)
 
-        if results[0].masks != None:
+        if results[0].masks is not None:
             # resizing the original image to the size of mask
             resize_orig_img = cv2.resize(results[0].orig_img, (len(results[0].masks.data[0][0]), len(results[0].masks.data[0]))) 
 
             max_white_pixels, data_idx = 0, 0
             x_mean, y_mean = -1, -1
             for i in range(len(results[0].masks.data)):
+                '''
+                results = ops.non_max_suppression(results[0].boxes.data, 
+                                              conf_thres=conf_thres, 
+                                              iou_thres=iou_thres, 
+                                              classes=None, 
+                                              agnostic=False, 
+                                              max_det=max_det)
+                '''
+                #results = non_max_suppression(results[0].masks.data[0], conf_thres=conf_thres, iou_thres=iou_thres, classes=None, agnostic=False, max_det=max_det, max_wh=1000)
+
                 indices = find_element_indices(results[0].masks.data[0].cpu().numpy(), 1) # a pixel belonging to a segmented class is having a value of 1, rest 0
-                
+                #indices = find_element_indices(results[0].masks.data[0].numpy(), 1)
+
                 # putting a threshold to the segmented region to detect the denser part of the smoke and finding the centroid of the denser region
                 white_x_mean, white_y_mean, white_pixel_indices = check_white_pixels(indices, resize_orig_img)
                 
@@ -214,11 +226,6 @@ def imagecallback(img):
                 cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum),img_numpy))
         
         
-def time_callback(gpstime):
-    global gps_t
-    gps_t = float(gpstime.time_ref.to_sec())
-
-
 
 def init_detection_node():
     global pub, box, video, timelog
@@ -243,10 +250,8 @@ def init_detection_node():
     timelog.write('FrameID,Timestamp_Jetson,Timestamp_GPS,Centroid_x,Centroid_y,Width,Height\n')
 
     # initializing node
-    rospy.init_node('segment_smoke', anonymous=False)
-    rospy.Subscriber('/camera/image', Image, imagecallback)
-    rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
-    #rospy.Subscriber('front_centre_cam', Image, imagecallback)
+    rospy.init_node('segmentation_node', anonymous=False)
+    rospy.Subscriber('front_centre_cam', Image, imagecallback)
     
     rospy.spin()
 
@@ -296,10 +301,10 @@ def check_white_pixels(mask_indices, img):
         y_mean = -1
 
     #print(f'Len of mask_indices: {len(mask_indices)}, Len of white_pixel_indices: {len(white_pixel_indices)}', end='\r')
-    
-    img = cv2.circle(img, (y_mean, x_mean), 3, (255, 0, 0), -1)
-    cv2.imshow('Processed Image', img)
-    cv2.waitKey(1)
+    if VIEW_IMG:
+        img = cv2.circle(img, (y_mean, x_mean), 3, (255, 0, 0), -1)
+        cv2.imshow('Processed Image', img)
+        cv2.waitKey(1)
 
     if len(white_pixel_indices) != 0:
         return x_mean, y_mean, white_pixel_indices

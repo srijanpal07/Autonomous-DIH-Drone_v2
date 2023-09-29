@@ -1,4 +1,4 @@
-#!/usr/bin/python3 
+#!/usr/local/bin/python3.10 
 # license removed for brevity
 from operator import truediv
 from re import sub
@@ -17,7 +17,6 @@ import argparse
 from pathlib import Path
 import time
 import torch
-import imageio
 # import torch_tensorrt
 print(f"Torch setup complete. Using torch {torch.__version__} ({torch.cuda.get_device_properties(0).name if torch.cuda.is_available() else 'CPU'})")
 
@@ -30,8 +29,8 @@ conf_thres=0.4  # confidence threshold
 iou_thres=0.45  # NMS IOU threshold
 
 VIEW_IMG=True
-SAVE_IMG = True # Originally False
-save_format = '.jpg' # originally'.avi'
+SAVE_IMG = False # Originally False
+save_format = '.avi' # originally'.avi'
 #-----------------------------------------------------#
 gps_t = 0
 # create saving directory
@@ -39,8 +38,7 @@ gps_t = 0
 tmp = datetime.datetime.now()
 stamp = ("%02d-%02d-%02d" % 
     (tmp.year, tmp.month, tmp.day))
-maindir = Path('/media/swarm1/gaia1/Data/autonomousdihdrone_v2')
-#maindir = Path('./SavedData')
+maindir = Path('./SavedData')
 runs_today = list(maindir.glob('*%s*_detection' % stamp))
 if runs_today:
     runs_today = [str(name) for name in runs_today]
@@ -76,9 +74,9 @@ global imgsz, model, device, names
 # labeling text on image
 BLACK = (265,265,265)
 font = cv2.FONT_HERSHEY_SIMPLEX
-font_size = 0.5
+font_size = 1
 font_color = BLACK
-font_thickness = 1
+font_thickness = 2
 
 def imagecallback(img):
     # print("imagecallback()")
@@ -96,7 +94,7 @@ def imagecallback(img):
     img_numpy = np.frombuffer(img.data,dtype=np.uint8).reshape(img.height,img.width,-1)
 
     if rospy.Time.now() - img.header.stamp > rospy.Duration(max_delay):
-        print("DetectionNode: dropping old image from detection", end='\r')
+        print("DetectionNode: dropping old image from detection\n")
         # text_to_image = 'skipped'
         return
     else:
@@ -130,7 +128,7 @@ def imagecallback(img):
             box.bbox.size_x = -1
             box.bbox.size_y = -1
         pub.publish(box)
-        text_to_image = 'Processed'
+        text_to_image = 'processed'
         # print('Time after running detection')
         # print('Image %d' % box.source_img.header.seq)
         # print(box.source_img.header.stamp)
@@ -159,10 +157,10 @@ def imagecallback(img):
         elif save_format == '.avi':
             video.write(img_numpy)
         else:
-            img_bgr = cv2.cvtColor(img_numpy, cv2.COLOR_RGB2BGR)
-            imageio.imsave(savedir.joinpath('Detection-%06.0f.jpg' % savenum), img_bgr)
+            cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum),img_numpy))
     if VIEW_IMG:
-        '''
+        # im_with_boxes = annotator.result()
+        # cv2.imshow('Detection', img_numpy)
         result = img_numpy
         scale_percent = 25 # percent of original size
         width = int(result.shape[1] * scale_percent / 100)
@@ -172,15 +170,11 @@ def imagecallback(img):
         # resize image
         resized = cv2.resize(result, dim, interpolation = cv2.INTER_AREA)
         cv2.imshow('Detection',resized)
-        '''
-        cv2.imshow('Detection',img_numpy)
         cv2.waitKey(1)  # 1 millisecond
+    # print('Rest of callback function took',1e3*(time.time()-t1))
+    # print('Entire callback took',1e3*(time.time() - time_stamp))
+    # print('Detection fps ~',1/(time.time() - time_stamp))
 
-
-
-def time_callback(gpstime):
-    global gps_t
-    gps_t = float(gpstime.time_ref.to_sec())
 
 def init_detection_node():
     global pub,box,video,timelog
@@ -224,10 +218,9 @@ def init_detection_node():
     timelog.write('FrameID,Timestamp_Jetson,Timestamp_GPS,Center_x,Center_y,Width,Height\n')
 
     # initializing node
-    rospy.init_node('detectionnode', anonymous=False)
-    #rospy.Subscriber('front_centre_cam', Image, imagecallback)
-    rospy.Subscriber('/camera/image', Image, imagecallback)
-    rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
+    rospy.init_node('detection_node', anonymous=False)
+    rospy.Subscriber('front_centre_cam', Image, imagecallback)
+    # rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
     
 
     rospy.spin()

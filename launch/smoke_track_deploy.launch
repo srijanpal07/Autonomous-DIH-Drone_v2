@@ -1,0 +1,15 @@
+<launch>
+	
+	<node name="cameranode" pkg="autonomousdihdrone_v2" type="cameranode.py" output="screen"/>
+
+	<node name="detection_node" pkg="autonomousdihdrone_v2" type="detection.py" output="screen"/>
+
+	<node name="opticalflow_node" pkg="autonomousdihdrone_v2" type="opticalflownode.py" output="screen"/>
+	
+	<node name="segmentation_node" pkg="autonomousdihdrone_v2" type="segment_v8.py" output="screen"/>
+
+	<node name="feedbackcontrol_node" pkg="autonomousdihdrone_v2" type="feedbackcontrolnode_sp_test.py" output="screen"/>
+
+	
+
+</launch>

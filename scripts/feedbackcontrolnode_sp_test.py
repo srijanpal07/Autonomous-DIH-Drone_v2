@@ -1,19 +1,15 @@
-#!/usr/bin/python3 
+#!/usr/local/bin/python3.10 
 # license removed for brevity
 
 from ast import And
 from pickle import TRUE
-#import airsim
-#from airsim_ros_pkgs.msg import GimbalAngleEulerCmd, GPSYaw
 import rospy
 from vision_msgs.msg import BoundingBox2D,Detection2D
 from geometry_msgs.msg import Twist, PoseStamped, TwistStamped
 from sensor_msgs.msg import TimeReference,NavSatFix
 from mavros_msgs.msg import OverrideRCIn, State
-
 from geographic_msgs.msg import GeoPoseStamped
 from mavros_msgs.msg import PositionTarget
-
 from mavros_msgs.srv import CommandBool, CommandBoolRequest, CommandTOL, CommandTOLRequest, SetMode, SetModeRequest
 from std_msgs.msg import Float64, String
 import math
@@ -26,18 +22,28 @@ from pathlib import Path
 from filterpy.kalman import KalmanFilter
 from geopy.distance import geodesic
 
+global EXECUTION
+EXECUTION = 'SIMULATION' # 'SIMULATION' or 'DEPLOYMENT'
+
+if EXECUTION == 'SIMULATION':
+    import airsim
+    from airsim_ros_pkgs.msg import GimbalAngleEulerCmd, GPSYaw
+
 
 global horizontalerror, verticalerror, sizeerror
-time_lastbox = None
-global horizontalerror_smoketrack, verticalerror_smoketrack, sizeerror_smoketrack, horizontalerror_smoketrack_list
-horizontalerror_smoketrack_list =[]
-# global body_vel_pub
-time_lastbox_smoketrack = None
+global horizontalerror_smoketrack, verticalerror_smoketrack, sizeerror_smoketrack
+global horizontalerror_keypoint, verticalerror_keypoint
+global horizontalerror_smoketrack_list
 global head, slope_deg
-head, slope_deg = 0.0, 0.0
 global source_gps
-source_gps = [0.0, 0.0, 0.0] # lattitude, longitude and altitude
 global setpoint_global_pub
+
+horizontalerror_smoketrack_list =[]
+time_lastbox, time_lastbox_smoketrack = None, None
+head, slope_deg = 0.0, 0.0
+source_gps = [0.0, 0.0, 0.0] # lattitude, longitude and altitude
+
+
 
 
 #------------OPTIONS FOR MODES-------#
@@ -62,8 +68,7 @@ tmp = datetime.datetime.now()
 stamp = ("%02d-%02d-%02d" % 
     (tmp.year, tmp.month, tmp.day))
 # maindir = Path('/home/%s/1FeedbackControl' % username)
-# maindir = Path('./SavedData')
-maindir = Path('/media/swarm1/gaia1/Data/autonomousdihdrone_v2')
+maindir = Path('./SavedData')
 runs_today = list(maindir.glob('*%s*_fc-data' % stamp))
 if runs_today:
     runs_today = [str(name) for name in runs_today]
@@ -103,8 +108,6 @@ sampling_t0 = None
 global track_sampling_time
 track_sampling_time = True
 global fspeed_head, hspeed_head
-global print_iter
-print_iter = 0
 #------------------------srijan---------------------------#
 
 
@@ -183,7 +186,7 @@ else:
 pitchcommand = pitch_init
 yawcommand = yaw_center
 #ADDED for airsim
-#airsim_yaw = 0
+airsim_yaw = 0
 publish_rate = 0
 
 
@@ -217,47 +220,48 @@ kf.P *= 100.0  # Initial covariance matrix
 
 # --------------------- Kalman Filter Initialization --------------------- #
 
-'''
+
+
 def moveAirsimGimbal(pitchcommand, yawcommand):
-    '''
-    # Converts gimbal's pwm commands to angles for running is simulation
-    # pitchcommand - Pitch PWM. 1000 is straight ahead (0 deg) and 1900 is straight down (-90 deg) 
-    # yawcommand - Yaw PWM. 1000 is -45 deg and 2000 is 45 deg
+        '''
+        Converts gimbal's pwm commands to angles for running is simulation
+        pitchcommand - Pitch PWM. 1000 is straight ahead (0 deg) and 1900 is straight down (-90 deg) 
+        yawcommand - Yaw PWM. 1000 is -45 deg and 2000 is 45 deg
 
-'''
-    if print_stat: print(f'-------------------Inside moveAirsimGimbal()-------------------\npithchcommand: {pitchcommand}, yawcommand: {yawcommand}')
-    global gimbal, airsim_yaw, yaw
-    airsim_yaw = math.degrees(yaw)
-    # print("Drone Yaw RAW =", airsim_yaw, "AFTER =", airsim_yaw+360 if airsim_yaw<0 else airsim_yaw)
-    if airsim_yaw<0:
-        airsim_yaw += 360
-    gimbal_pitch = (1000 - pitchcommand) / 10 # previously: gimbal_pitch = (1000 - pitchcommand) / 10 , (280 - pitchcommand) / 18 , 
-    gimbal_yaw = ((yaw_center - yawcommand) * 45) / 500
-    cmd = GimbalAngleEulerCmd()
-    cmd.camera_name = "front_center"
-    cmd.vehicle_name = "PX4"
-    cmd.pitch = gimbal_pitch
-    # cmd.pitch = -10
-    # cmd.yaw = -airsim_yaw + 90
-    cmd.yaw = gimbal_yaw - airsim_yaw + 90
-    if cmd.yaw>=360:
-        cmd.yaw = cmd.yaw % 360
-    
-    # print("Cam Angle= ", cmd.yaw, ", Gimbal Pitch = ", cmd.pitch, "AirsimYaw =", airsim_yaw, "Gimbal Yaw =", gimbal_yaw)
-    #gimbal.publish(cmd)
+        '''
 
-'''
+        global gimbal, airsim_yaw, yaw
+
+        if print_stat: print(f'-------------------Inside moveAirsimGimbal()-------------------\npithchcommand: {pitchcommand}, yawcommand: {yawcommand}')
+        
+        airsim_yaw = math.degrees(yaw)
+        if airsim_yaw<0:
+            airsim_yaw += 360
+        gimbal_pitch = (1000 - pitchcommand) / 10  
+        gimbal_yaw = ((yaw_center - yawcommand) * 45) / 500
+        cmd = GimbalAngleEulerCmd()
+        cmd.camera_name = "front_center"
+        cmd.vehicle_name = "PX4"
+        cmd.pitch = gimbal_pitch
+        cmd.yaw = gimbal_yaw - airsim_yaw + 90
+        if cmd.yaw>=360:
+            cmd.yaw = cmd.yaw % 360
+        
+        gimbal.publish(cmd)
+
+
 
 def offboard():
-    # Set to OFFBOARD mode so that it uses mavros commands for navigation
-    mode = SetModeRequest()
-    mode.base_mode = 0
-    mode.custom_mode = "OFFBOARD"
-    print("GOING AUTONOMOUS")
-    print("Setting up...", end ="->")
-    setm = rospy.ServiceProxy('/mavros/set_mode', SetMode)
-    resp = setm(mode)
-    print(resp)
+        """
+        Used in Simulation to set 'OFFBOARD' mode so that it uses mavros commands for navigation
+        """
+        mode = SetModeRequest()
+        mode.base_mode = 0
+        mode.custom_mode = "OFFBOARD"
+        print("Setting up...", end ="->")
+        setm = rospy.ServiceProxy('/mavros/set_mode', SetMode)
+        resp = setm(mode)
+        print(resp)
     
 
 
@@ -271,330 +275,303 @@ def euler_from_quaternion(x, y, z, w):
         t0 = +2.0 * (w * x + y * z)
         t1 = +1.0 - 2.0 * (x * x + y * y)
         roll_x = math.atan2(t0, t1)
-     
+        
         t2 = +2.0 * (w * y - z * x)
         t2 = +1.0 if t2 > +1.0 else t2
         t2 = -1.0 if t2 < -1.0 else t2
         pitch_y = math.asin(t2)
-     
+        
         t3 = +2.0 * (w * z + x * y)
         t4 = +1.0 - 2.0 * (y * y + z * z)
         yaw_z = math.atan2(t3, t4)
-     
+        
         return roll_x, pitch_y, yaw_z # in radians
 
 
 
 def euler_to_quaternion(roll, pitch, yaw):
-    # Convert Euler angles to quaternion
-    cy = math.cos(yaw * 0.5)
-    sy = math.sin(yaw * 0.5)
-    cp = math.cos(pitch * 0.5)
-    sp = math.sin(pitch * 0.5)
-    cr = math.cos(roll * 0.5)
-    sr = math.sin(roll * 0.5)
+        # Convert Euler angles to quaternion
+        cy = math.cos(yaw * 0.5)
+        sy = math.sin(yaw * 0.5)
+        cp = math.cos(pitch * 0.5)
+        sp = math.sin(pitch * 0.5)
+        cr = math.cos(roll * 0.5)
+        sr = math.sin(roll * 0.5)
 
-    # Calculate quaternion components
-    w = cy * cp * cr + sy * sp * sr
-    x = cy * cp * sr - sy * sp * cr
-    y = sy * cp * sr + cy * sp * cr
-    z = sy * cp * cr - cy * sp * sr
+        # Calculate quaternion components
+        w = cy * cp * cr + sy * sp * sr
+        x = cy * cp * sr - sy * sp * cr
+        y = sy * cp * sr + cy * sp * cr
+        z = sy * cp * cr - cy * sp * sr
 
-    return x, y, z, w
+        return x, y, z, w
 
 
 
 def pose_callback(pose):
-    global yaw,alt, gps_x, gps_y
-    q = pose.pose.orientation
-    # yaw = atan2(2.0*(q.y*q.z + q.w*q.x), q.w*q.w - q.x*q.x - q.y*q.y + q.z*q.z)
-    r,p,y = euler_from_quaternion(q.x,q.y,q.z,q.w)
-    yaw = y
-    alt = pose.pose.position.z
-    gps_x = pose.pose.position.x
-    gps_y = pose.pose.position.y
-    if print_stat: print(f"----------------Inside pose_callback():----------------\nalt: {alt}, gps_x:{gps_x}, gps_y:{gps_y}")
-    if print_stat: print(f'yaw: {yaw}, alt: {alt}, gps_x:{gps_x}, gps_y:{gps_y}')
+        global yaw,alt, gps_x, gps_y
+        q = pose.pose.orientation
+        # yaw = atan2(2.0*(q.y*q.z + q.w*q.x), q.w*q.w - q.x*q.x - q.y*q.y + q.z*q.z)
+        r,p,y = euler_from_quaternion(q.x,q.y,q.z,q.w)
+        yaw = y
+        alt = pose.pose.position.z
+        gps_x = pose.pose.position.x
+        gps_y = pose.pose.position.y
+        if print_stat: print(f"----------------Inside pose_callback():----------------\nalt: {alt}, gps_x:{gps_x}, gps_y:{gps_y}")
+        if print_stat: print(f'yaw: {yaw}, alt: {alt}, gps_x:{gps_x}, gps_y:{gps_y}')
 
 
 
 def compass_hdg_callback(heading):
-    global head
-    global source_gps
-    global sample_along_heading
-    global slope_deg
+        global head
+        global source_gps
+        global sample_along_heading
+        global slope_deg
 
-    head = heading.data
-    if print_stat: print(f'Heading: {head}, heading in rad: {np.deg2rad(head)}')
-    dlat = math.radians(gps_lat-source_gps[0])
-    dlon = math.radians(gps_long-source_gps[1])
-    slope_rad = math.atan2(dlon, dlat)
-    slope_deg = math.degrees(slope_rad)
-    if print_stat: print(f'Heading: {head}, Slope(deg): {slope_deg}, Diff: {head - slope_deg}, Slope(rad): {slope_rad} ', end='\r')
-    # if sample_along_heading: 
-        # smoketrack_yaw()
-
-
-
-def smoketrack_yaw():
-    global slope_deg
-    global setpoint_global_pub
-    global head
-    global gps_lat, gps_long, gps_alt
-
-    yaw = head - slope_deg
-    setpoint = _build_global_setpoint2(gps_lat, gps_long, gps_alt, yaw) # yaw = 0 is heading 90 in airsim
-    setpoint_global_pub.publish(setpoint)
-    if print_stat_test: print(f'smoketrack_yaw activated! Heading: {head}, Slope(deg): {slope_deg}, Diff: {head - slope_deg}')
+        head = heading.data
+        if print_stat: print(f'Heading: {head}, heading in rad: {np.deg2rad(head)}')
+        dlat = math.radians(gps_lat-source_gps[0])
+        dlon = math.radians(gps_long-source_gps[1])
+        slope_rad = math.atan2(dlon, dlat)
+        slope_deg = math.degrees(slope_rad)
+        if print_stat: print(f'Heading: {head}, Slope(deg): {slope_deg}, Diff: {head - slope_deg}, Slope(rad): {slope_rad} ', end='\r')
 
 
 
 def state_callback(state):
-    """
-    check if drone FCU is in loiter or guided mode
-    """
-    global guided_mode
-    global print_state
-    if print_stat: print(f"----------------Inside state_callback():----------------\nstate.mode={state.mode}")
-    if state.mode == 'OFFBOARD':
-        guided_mode = True
-        if print_stat: print('OFFBOARD')
-        if print_flags and print_state: 
-            print("state.mode == 'OFFBOARD' -> guided_mode = True")
-            print_state = False
-    else:
-        print("!!!!!!!!!!!!!!!! NOT OFFBOARD", end='\r')
-        guided_mode = False
-        if print_flags: print("state.mode == 'Not OFFBOARD' -> guided_mode = False")
+        """
+        check if drone FCU is in loiter or guided mode
+        """
+        global guided_mode
+        global print_state
+        if print_stat: print(f"----------------Inside state_callback():----------------\nstate.mode={state.mode}")
+        if state.mode == 'OFFBOARD':
+            guided_mode = True
+            if print_stat: print('OFFBOARD')
+            if print_flags and print_state: 
+                print("state.mode == 'OFFBOARD' -> guided_mode = True")
+                print_state = False
+        else:
+            print("!!!!!!!!!!!!!!!! NOT OFFBOARD")
+            guided_mode = False
+            if print_flags: print("state.mode == 'Not OFFBOARD' -> guided_mode = False")
 
 
 
 def time_callback(gpstime):
-    global gps_t
-    gps_t = float(gpstime.time_ref.to_sec())
-    # gps_t = gps_t
-    if print_stat: print(f"----------------Inside time_callback:----------------\nTime: {gps_t}")
+        global gps_t
+        gps_t = float(gpstime.time_ref.to_sec())
+        # gps_t = gps_t
+        if print_stat: print(f"----------------Inside time_callback:----------------\nTime: {gps_t}")
 
 
 
 def gps_callback(gpsglobal):
-    global gps_lat, gps_long, gps_alt
+        global gps_lat, gps_long, gps_alt
 
-    gps_lat = gpsglobal.latitude
-    gps_long = gpsglobal.longitude
-    gps_alt = gpsglobal.altitude
-    if print_stat: print(f"----------------Inside gps_callback():----------------\ngps_alt: {gps_alt}, gps_long: {gps_long}, gps_alt: {gps_alt}")
-    if print_stat: print(f'gps_alt: {gps_alt}, gps_lat:{gps_lat}, gps_long:{gps_long}')
+        gps_lat = gpsglobal.latitude
+        gps_long = gpsglobal.longitude
+        gps_alt = gpsglobal.altitude
+        if print_stat: print(f"----------------Inside gps_callback():----------------\ngps_alt: {gps_alt}, gps_long: {gps_long}, gps_alt: {gps_alt}")
+        if print_stat: print(f'gps_alt: {gps_alt}, gps_lat:{gps_lat}, gps_long:{gps_long}')
     
 
 
 def rel_alt_callback(altrel):
-    global gps_alt_rel
-    gps_alt_rel = altrel.data # relative altitude just from GPS data
-    if print_stat: print(f"----------------Inside rel_alt_callback():---------------\ngps_alt_rel: {gps_alt_rel}")
+        global gps_alt_rel
+        gps_alt_rel = altrel.data # relative altitude just from GPS data
+        if print_stat: print(f"----------------Inside rel_alt_callback():---------------\ngps_alt_rel: {gps_alt_rel}")
 
 
 
 def boundingbox_callback(box):
-    global horizontalerror, verticalerror, sizeerror
-    global time_lastbox, pitchcommand, yawcommand
-    global MOVE_ABOVE, OPT_FLOW
-    # positive errors give right, up
-    if box.bbox.center.x != -1:
-        if print_stat: print("----------------Inside boundingbox_callback():----------------\nBounding box found : box.bbox.center.x != -1")
-        time_lastbox = rospy.Time.now()
-        bboxsize = (box.bbox.size_x + box.bbox.size_y)/2 # take the average so that a very thin, long box will still be seen as small
-        
-        if not above_object: # different bbox size desired for approach and above stages for hybrid mode
-            if print_stat: print("Not above object ... ")
-            sizeerror = setpoint_size_approach - bboxsize # if box is smaller than setpoit, error is positive
+        global horizontalerror, verticalerror, sizeerror
+        global time_lastbox, pitchcommand, yawcommand
+        global MOVE_ABOVE, OPT_FLOW
+        # positive errors give right, up
+        if box.bbox.center.x != -1:
+            if print_stat: print("----------------Inside boundingbox_callback():----------------\nBounding box found : box.bbox.center.x != -1")
+            time_lastbox = rospy.Time.now()
+            bboxsize = (box.bbox.size_x + box.bbox.size_y)/2 # take the average so that a very thin, long box will still be seen as small
+            
+            if not above_object: # different bbox size desired for approach and above stages for hybrid mode
+                if print_stat: print("Not above object ... ")
+                sizeerror = setpoint_size_approach - bboxsize # if box is smaller than setpoit, error is positive
+            else:
+                if print_stat: print("above_object was set to true previously")
+                sizeerror = setpoint_size - bboxsize # if box is smaller than setpoit, error is positive
+
+            if print_size_error: print('Setpoint - bbox (sizeerror) = %f' % sizeerror)
+
+            if not OPT_FLOW:
+                if print_stat: print("OPT_FLOW is set to False: Optical flow not running")   
+                horizontalerror = .5-box.bbox.center.x # if box center is on LHS of image, error is positive
+                verticalerror = .5-box.bbox.center.y # if box center is on upper half of image, error is positive 
+                if print_stat: 
+                    print(f'Horzontal error: {round(horizontalerror, 5)}, Vertical error: {round(verticalerror, 5)}')
+                    print(f"Changed pitchcommand,delta: {round(pitchcommand, 5)},{round(pitchdelta, 5)}  changed yawcommand, delta: {round(yawcommand, 5)},{round(yawdelta, 5)}")
+
+            if pitchcommand < pitch_thresh and bboxsize > 0.75: # if close and gimbal pitched upward, move to get above the object
+                MOVE_ABOVE = True
+                if print_stat: print('Gimbal pitched upward moving above to get above object ... : MOVE_ABOVE is set to True')
         else:
-            if print_stat: print("above_object was set to true previously")
-            sizeerror = setpoint_size - bboxsize # if box is smaller than setpoit, error is positive
-
-        if print_size_error: print('Setpoint - bbox (sizeerror) = %f' % sizeerror)
-
-        if not OPT_FLOW:
-            if print_stat: print("OPT_FLOW is set to False: Optical flow not running")   
-            horizontalerror = .5-box.bbox.center.x # if box center is on LHS of image, error is positive
-            verticalerror = .5-box.bbox.center.y # if box center is on upper half of image, error is positive 
-            if print_stat: print(f'Horzontal error: {round(horizontalerror, 5)}, Vertical error: {round(verticalerror, 5)}')
-
-            '''
-            pitchdelta = verticalerror * gimbal_pitch_gain
-            pitchdelta = min(max(pitchdelta,-limit_pitchchange),limit_pitchchange)
-            # print(f"Pitch command,delta: {pitchcommand},{pitchdelta}")
-            pitchcommand += pitchdelta
-            pitchcommand = min(max(pitchcommand,1000),2000)
-            yawdelta = horizontalerror * gimbal_yaw_gain
-            yawdelta = min(max(yawdelta,-limit_yawchange),limit_yawchange)
-            # print(f"Yaw command, delta: {yawcommand},{yawdelta}")
-            yawcommand += yawdelta
-            yawcommand = min(max(yawcommand,1000),2000)
-            '''
-
-            #if print_stat: print(f"Changed pitchcommand,delta: {round(pitchcommand, 5)},{round(pitchdelta, 5)}  changed yawcommand, delta: {round(yawcommand, 5)},{round(yawdelta, 5)}")
-
-        if pitchcommand < pitch_thresh and bboxsize > 0.75: # if close and gimbal pitched upward, move to get above the object
-            MOVE_ABOVE = True
-            if print_stat: print('Gimbal pitched upward moving above to get above object ... : MOVE_ABOVE is set to True')
-    else:
-        if print_stat: print("----------------Inside boundingbox_callback():----------------\nBounding box not found : box.bbox.center.x = -1")
-   
-    return
+            if print_stat: print("----------------Inside boundingbox_callback():----------------\nBounding box not found : box.bbox.center.x = -1")
+    
+        return
 
 
 
 def segmentation_callback(box):
-    global horizontalerror_smoketrack, verticalerror_smoketrack, sizeerror_smoketrack, horizontalerror_smoketrack_list
-    global time_lastbox_smoketrack, pitchcommand, yawcommand
-    global MOVE_ABOVE, OPT_FLOW
-    global kf, previous_yaw_measurements
-    global sampling
-    
-    # positive errors give right, up
-    if box.bbox.center.x != -1 and box.bbox.size_x > 7000:
-        if print_stat: 
-            if sampling: print("Sampling ... Yawing using Segmentation")
-        time_lastbox_smoketrack = rospy.Time.now()
-        bboxsize = (box.bbox.size_x + box.bbox.size_y)/2 # take the average so that a very thin, long box will still be seen as small
+        global horizontalerror_smoketrack, verticalerror_smoketrack, sizeerror_smoketrack, horizontalerror_smoketrack_list
+        global time_lastbox_smoketrack, pitchcommand, yawcommand
+        global MOVE_ABOVE, OPT_FLOW
+        global kf, previous_yaw_measurements
+        global sampling
         
-        if not above_object: # different bbox size desired for approach and above stages for hybrid mode
-            if print_stat: print("Not above object ... ")
-            sizeerror_smoketrack = 0 # setpoint_size_approach - bboxsize # if box is smaller than setpoit, error is positive
+        # positive errors give right, up
+        if box.bbox.center.x != -1 and box.bbox.size_x > 7000:
+            if print_stat: 
+                if sampling: print("Sampling ... Yawing using Segmentation")
+            time_lastbox_smoketrack = rospy.Time.now()
+            bboxsize = (box.bbox.size_x + box.bbox.size_y)/2 # take the average so that a very thin, long box will still be seen as small
+            
+            if not above_object: # different bbox size desired for approach and above stages for hybrid mode
+                if print_stat: print("Not above object ... ")
+                sizeerror_smoketrack = 0 # setpoint_size_approach - bboxsize # if box is smaller than setpoit, error is positive
+            else:
+                if print_stat: print("above_object was set to true previously")
+                sizeerror_smoketrack = 0 # setpoint_size - bboxsize # if box is smaller than setpoit, error is positive
+
+            if print_size_error: print('Setpoint - bbox (sizeerror) = %f' % sizeerror_smoketrack)
+
+            if not OPT_FLOW:
+                if print_stat: print("OPT_FLOW is set to False: Optical flow not running")   
+                horizontalerror_smoketrack = .5-box.bbox.center.x # if box center is on LHS of image, error is positive
+                verticalerror_smoketrack = .5-box.bbox.center.y # if box center is on upper half of image, error is positive 
+                
+                # Update the Kalman filter with the new measurement
+                update_kalman_filter(kf, horizontalerror_smoketrack)
+                previous_yaw_measurements.append(horizontalerror_smoketrack)
+                
+                if print_stat: print(f'Horzontal error: {round(horizontalerror_smoketrack, 5)}, Vertical error: {round(verticalerror, 5)}')
+
+            if pitchcommand < pitch_thresh and bboxsize > 0.75: # if close and gimbal pitched upward, move to get above the object
+                MOVE_ABOVE = True
+                if print_stat: print('Gimbal pitched upward moving above to get above object ... : MOVE_ABOVE is set to True')
+
         else:
-            if print_stat: print("above_object was set to true previously")
-            sizeerror_smoketrack = 0 # setpoint_size - bboxsize # if box is smaller than setpoit, error is positive
+            if print_stat: 
+                if sampling: print("Sampling ... Yawing using Kalman Filter")
+            horizontalerror_smoketrack = kf.x[0, 0] 
 
-        if print_size_error: print('Setpoint - bbox (sizeerror) = %f' % sizeerror_smoketrack)
+        return
 
-        if not OPT_FLOW:
-            if print_stat: print("OPT_FLOW is set to False: Optical flow not running")   
-            horizontalerror_smoketrack = .5-box.bbox.center.x # if box center is on LHS of image, error is positive
-            verticalerror_smoketrack = .5-box.bbox.center.y # if box center is on upper half of image, error is positive 
-            
-            # Update the Kalman filter with the new measurement
-            update_kalman_filter(kf, horizontalerror_smoketrack)
-            previous_yaw_measurements.append(horizontalerror_smoketrack)
-            
-            if print_stat: print(f'Horzontal error: {round(horizontalerror_smoketrack, 5)}, Vertical error: {round(verticalerror, 5)}')
-            # if print_stat: print(f"Changed pitchcommand,delta: {round(pitchcommand, 5)},{round(pitchdelta, 5)}  changed yawcommand, delta: {round(yawcommand, 5)},{round(yawdelta, 5)}")
 
-        if pitchcommand < pitch_thresh and bboxsize > 0.75: # if close and gimbal pitched upward, move to get above the object
-            MOVE_ABOVE = True
-            if print_stat: print('Gimbal pitched upward moving above to get above object ... : MOVE_ABOVE is set to True')
 
-    else:
-        if print_stat: 
-            if sampling: print("Sampling ... Yawing using Kalman Filter")
-        horizontalerror_smoketrack = kf.x[0, 0] 
-
-    return
+def keypoint_callback(box):
+        global horizontalerror_keypoint, verticalerror_keypoint
+        global time_lastbox_keypoint
+        global MOVE_ABOVE, OPT_FLOW
+        
+        # positive errors give right, up
+        if box.bbox.center.x != -1:
+            time_lastbox_keypoint = rospy.Time.now()  
+            horizontalerror_keypoint = 0.5-box.bbox.center.x # if smoke source keypoint is on LHS of image, error is positive
+            verticalerror_keypoint = 0.5-box.bbox.center.y # if smoke source keypoint is on upper half of image, error is positive 
+        else:
+            horizontalerror_keypoint = 0
+            verticalerror_keypoint = 0
+        return
 
 
 
 def flow_callback(flow):
-    global horizontalerror, verticalerror,time_lastbox
-    global pitchcommand, yawcommand
-    global flow_x,flow_y,flow_t
-    global OPT_FLOW,OPT_COMPUTE_FLAG
-    
-    # typical values might be around 10 pixels, depending on frame rate
-    flow_x = flow.size_x # movement to the right in the image is positive
-    flow_y = -flow.size_y # this is made negative so that positive flow_y means the object was moving toward the top of the image (RAFT returns negative y for this (i.e., toward smaller y coordinates))
-    # now movement to the top is positive flow_y
-    flow_t = float(gps_t)
-    # adjust the feedback error using the optical flow
-    if OPT_FLOW:
-        if print_stat: print('----------------Inside flow_callback():----------------\nDoing optical flow feedback ...')
-        OPT_COMPUTE_FLAG = True # this signals to later in the code that the first usable optical flow data can be pplied (instead of inheriting errors from bbox callback)
-        horizontalerror = -flow_x # to be consistent with the bounding box error
-        verticalerror = flow_y
-        if not above_object: # this should never end up being called normally, just for debugging optical flow in side-view
-            # pitch
-            pitchdelta = verticalerror * gimbal_pitch_gain
-            pitchdelta = min(max(pitchdelta,-limit_pitchchange),limit_pitchchange)
-            pitchcommand += pitchdelta
-            pitchcommand = min(max(pitchcommand,1000),2000)
-            yawdelta = horizontalerror * gimbal_yaw_gain
-            yawdelta = min(max(yawdelta,-limit_yawchange),limit_yawchange)
-            yawcommand += yawdelta
-            yawcommand = min(max(yawcommand,1000),2000)
-        if print_flow:
-            if print_stat: print('Flow x,y = %f,%f' % (flow_x,flow_y))
-            if print_stat: print(f'horizontal error: {horizontalerror}, verticalerror: {verticalerror}')
+        global horizontalerror, verticalerror,time_lastbox
+        global pitchcommand, yawcommand
+        global flow_x,flow_y,flow_t
+        global OPT_FLOW,OPT_COMPUTE_FLAG
         
-        time_lastbox = rospy.Time.now()
-    else:
-        if print_stat: print("----------------Inside flow_callback():----------------\nOPT_FLOW was turned off: OPT_FLOW = False")
-    return
+        # typical values might be around 10 pixels, depending on frame rate
+        flow_x = flow.size_x # movement to the right in the image is positive
+        flow_y = -flow.size_y # this is made negative so that positive flow_y means the object was moving toward the top of the image (RAFT returns negative y for this (i.e., toward smaller y coordinates))
+        # now movement to the top is positive flow_y
+        flow_t = float(gps_t)
+        # adjust the feedback error using the optical flow
+        if OPT_FLOW:
+            if print_stat: print('----------------Inside flow_callback():----------------\nDoing optical flow feedback ...')
+            OPT_COMPUTE_FLAG = True # this signals to later in the code that the first usable optical flow data can be pplied (instead of inheriting errors from bbox callback)
+            horizontalerror = -flow_x # to be consistent with the bounding box error
+            verticalerror = flow_y
+            if not above_object: # this should never end up being called normally, just for debugging optical flow in side-view
+                # pitch
+                pitchdelta = verticalerror * gimbal_pitch_gain
+                pitchdelta = min(max(pitchdelta,-limit_pitchchange),limit_pitchchange)
+                pitchcommand += pitchdelta
+                pitchcommand = min(max(pitchcommand,1000),2000)
+                yawdelta = horizontalerror * gimbal_yaw_gain
+                yawdelta = min(max(yawdelta,-limit_yawchange),limit_yawchange)
+                yawcommand += yawdelta
+                yawcommand = min(max(yawcommand,1000),2000)
+            if print_flow:
+                if print_stat: print('Flow x,y = %f,%f' % (flow_x,flow_y))
+                if print_stat: print(f'horizontal error: {horizontalerror}, verticalerror: {verticalerror}')
+            
+            time_lastbox = rospy.Time.now()
+        else:
+            if print_stat: print("----------------Inside flow_callback():----------------\nOPT_FLOW was turned off: OPT_FLOW = False")
+        return
 
 
 
 def _build_global_setpoint2(latitude, longitude, altitude, yaw=0.0):
-    """Builds a message for the /mavros/setpoint_position/global topic
-    """
-    geo_pose_setpoint = GeoPoseStamped()
-    geo_pose_setpoint.header.stamp = rospy.Time.now()
-    geo_pose_setpoint.pose.position.latitude = latitude
-    geo_pose_setpoint.pose.position.longitude = longitude
-    geo_pose_setpoint.pose.position.altitude = altitude
+        """
+        Builds a message for the /mavros/setpoint_position/global topic
+        """
+        geo_pose_setpoint = GeoPoseStamped()
+        geo_pose_setpoint.header.stamp = rospy.Time.now()
+        geo_pose_setpoint.pose.position.latitude = latitude
+        geo_pose_setpoint.pose.position.longitude = longitude
+        geo_pose_setpoint.pose.position.altitude = altitude
 
-    
-    roll = 0.0
-    pitch = 0.0
-    q_x, q_y, q_z, q_w= euler_to_quaternion(roll, pitch, yaw)
-    geo_pose_setpoint.pose.orientation.x = q_x
-    geo_pose_setpoint.pose.orientation.y = q_y
-    geo_pose_setpoint.pose.orientation.z = q_z
-    geo_pose_setpoint.pose.orientation.w = q_w
-    
+        
+        roll = 0.0
+        pitch = 0.0
+        q_x, q_y, q_z, q_w= euler_to_quaternion(roll, pitch, yaw)
+        geo_pose_setpoint.pose.orientation.x = q_x
+        geo_pose_setpoint.pose.orientation.y = q_y
+        geo_pose_setpoint.pose.orientation.z = q_z
+        geo_pose_setpoint.pose.orientation.w = q_w
+        
 
-    return geo_pose_setpoint
+        return geo_pose_setpoint
 
 
 
+# Do not delete this function
 def build_local_setpoint(x, y, z, yaw):
-    """
-    Builds a message for the /mavros/setpoint_position/local topic
-    """
-    local_pose_setpoint = PoseStamped()
-    local_pose_setpoint.header.stamp = rospy.Time.now()
-    local_pose_setpoint.pose.position.x = x
-    local_pose_setpoint.pose.position.y = y
-    local_pose_setpoint.pose.position.z = z
-    
-    roll = 0.0
-    pitch = 0.0
-    q_x, q_y, q_z, q_w= euler_to_quaternion(roll, pitch, yaw)
-    local_pose_setpoint.pose.orientation.x = q_x
-    local_pose_setpoint.pose.orientation.y = q_y
-    local_pose_setpoint.pose.orientation.z = q_z
-    local_pose_setpoint.pose.orientation.w = q_w
+        """
+        Builds a message for the /mavros/setpoint_position/local topic
+        """
+        local_pose_setpoint = PoseStamped()
+        local_pose_setpoint.header.stamp = rospy.Time.now()
+        local_pose_setpoint.pose.position.x = x
+        local_pose_setpoint.pose.position.y = y
+        local_pose_setpoint.pose.position.z = z
+        
+        roll = 0.0
+        pitch = 0.0
+        q_x, q_y, q_z, q_w= euler_to_quaternion(roll, pitch, yaw)
+        local_pose_setpoint.pose.orientation.x = q_x
+        local_pose_setpoint.pose.orientation.y = q_y
+        local_pose_setpoint.pose.orientation.z = q_z
+        local_pose_setpoint.pose.orientation.w = q_w
 
-    return local_pose_setpoint
-
-
-
-def build_setpoint_attitude_cmd_vel(x_vel, y_vel, z_vel, x_ang, y_ang, z_ang):
-    """
-    Builds a message for the /mavros/setpoint_attitude/cmd_vel topic
-    not getting
-    """
-    attitude_setpoint = TwistStamped()
-    attitude_setpoint.header.stamp = rospy.Time.now()
-    attitude_setpoint.twist.linear.x = float(x_vel)
-    attitude_setpoint.twist.linear.y = float(y_vel)
-    attitude_setpoint.twist.linear.z = float(z_vel)
-    attitude_setpoint.twist.angular.x = float(x_ang)
-    attitude_setpoint.twist.angular.y = float(y_ang)
-    attitude_setpoint.twist.angular.z = float(z_ang)
-
-    return attitude_setpoint
+        return local_pose_setpoint
 
 
 
 def dofeedbackcontrol():
+    # ----------------------------- Nate ----------------------------- #
     global pitchcommand, yawcommand
     global above_object, forward_scan
     global yaw_mode,OPT_FLOW,OPT_COMPUTE_FLAG,MOVE_ABOVE
@@ -603,7 +580,10 @@ def dofeedbackcontrol():
     global hspeed,vspeed,fspeed
     global yawrate
     global horizontalerror,verticalerror
-    global twistpub, twistmsg,rcmsg,rcpub, gimbal
+    global twistpub, twistmsg,rcmsg,rcpub
+    # ----------------------------- Nate ----------------------------- #
+
+    global gimbal
     global publish_rate
     global smoketrack_pub, sample_along_heading
     global sampling_t0, track_sampling_time
@@ -611,40 +591,45 @@ def dofeedbackcontrol():
     global kf, previous_yaw_measurements
     global head, source_gps
     global setpoint_global_pub
+    global horizontalerror_keypoint, verticalerror_keypoint
 
     publish_rate = time.time()
 
-    
 
+    # ---------------------------------------------- Nate ---------------------------------------------- #
     #Initialize publishers/subscribers/node
     rospy.Subscriber('/bounding_box', Detection2D, boundingbox_callback)
-    rospy.Subscriber('/segmentation_box', Detection2D, segmentation_callback)
-    rospy.Subscriber('/mavros/state',State,state_callback)
     rospy.Subscriber('/mavros/local_position/pose', PoseStamped, pose_callback)
     rospy.Subscriber('/mavros/time_reference',TimeReference,time_callback)
     rospy.Subscriber('/mavros/global_position/global',NavSatFix,gps_callback)
     rospy.Subscriber('/mavros/global_position/rel_alt',Float64,rel_alt_callback)
     rospy.Subscriber('/flow',BoundingBox2D,flow_callback)
     rospy.Subscriber('/mavros/state',State,state_callback)
-    rospy.Subscriber('/mavros/global_position/compass_hdg',Float64,compass_hdg_callback)
     twistpub = rospy.Publisher('/mavros/setpoint_velocity/cmd_vel_unstamped', Twist, queue_size=1)
-    
-    # setpoint_local_pub = rospy.Publisher('/mavros/setpoint_position/local', PoseStamped, queue_size=1)
-    setpoint_global_pub = rospy.Publisher('/mavros/setpoint_position/global', GeoPoseStamped, queue_size=1) # used for yaw
-    # setpoint_attitude_pub = rospy.Publisher('/mavros/setpoint_attitude/cmd_vel', TwistStamped, queue_size=1)
-
     rcpub = rospy.Publisher('/mavros/rc/override', OverrideRCIn, queue_size=1)
-    #gimbal = rospy.Publisher('/airsim_node/gimbal_angle_euler_cmd', GimbalAngleEulerCmd, queue_size=1)
+    # ---------------------------------------------- Nate ---------------------------------------------- #
+
+    rospy.Subscriber('/segmentation_box', Detection2D, segmentation_callback)
+    rospy.Subscriber('/keypoints', Detection2D, keypoint_callback)
+    rospy.Subscriber('/mavros/global_position/compass_hdg',Float64,compass_hdg_callback)
     smoketrack_pub = rospy.Publisher('/smoketrack', String, queue_size=1)
+    if EXECUTION == 'SIMULATION': 
+        gimbal = rospy.Publisher('/airsim_node/gimbal_angle_euler_cmd', GimbalAngleEulerCmd, queue_size=1)
 
     # control loop
     twistmsg = Twist()
     rcmsg = OverrideRCIn()
     rcmsg.channels = np.zeros(18,dtype=np.uint16).tolist()
 
-    rate = rospy.Rate(20) # 20hz - originally 20hz
+    rate = rospy.Rate(20) # originally 10hz
 
-    
+    '''
+    while not rospy.is_shutdown():
+        setpoint = _build_global_setpoint2(gps_lat, gps_long, gps_alt_rel, 100) # just an example setpoint
+        setpoint_global_pub.publish(setpoint)
+        rate.sleep()
+         
+    '''
     
     while not rospy.is_shutdown():
 
@@ -683,7 +668,7 @@ def dofeedbackcontrol():
             if alt < alt_min:
                 rise_up(dz = 2,vz=0.5) #ORIGINAL
 
-            # end the forward scan phase once in air looking down and recognizing a particle
+            # end the forward scan phase once in air looking down and recognizing a smoke
             # only do this if this option is turned on
             if forward_scan_option and forward_scan:
                 if above_object and alt > alt_flow and pitchcommand > pitch_thresh:
@@ -770,8 +755,21 @@ def dofeedbackcontrol():
             # if its been more than half a second without detection during descent, stop lateral movement
             if print_stat: print("Inside : moving_to_set_alt and not sample_along_heading ...")
             if print_stat: print("Its been more than half a second without detection during descent, stopping lateral movement")
-            hspeed = -(horizontalerror) * traverse_gain * 2
-            fspeed = (verticalerror-0.15) * traverse_gain  # (verticalerror-0.10) to make the drone come down close to smoke source
+
+            if gps_alt > 145:
+                hspeed = -(horizontalerror) * (traverse_gain * 2)
+                fspeed = (verticalerror-0.15) * traverse_gain  # (verticalerror-0.15) to make the drone come down close to smoke source
+                alt_set_appr_speed = -3
+            elif gps_alt <= 145 and gps_alt > 118:
+                hspeed = - (horizontalerror_keypoint) * (traverse_gain)
+                fspeed = (verticalerror_keypoint) * (traverse_gain/1.5)
+                alt_set_appr_speed = -1
+                if print_stat: print(f'gps_alt: {gps_alt}, horizontalerror_keypoint: {horizontalerror_keypoint}, verticalerror_keypoint: {verticalerror_keypoint}')
+                if print_stat: print(f'hspeed: {hspeed}, fspeed: {fspeed}')
+            else:
+                hspeed = 0
+                fspeed = 0
+                alt_set_appr_speed = -1
             if print_stat: print(f'fspeed: {fspeed}, traverse_gain: {traverse_gain}, verticalerror: {verticalerror}') 
         elif time_lastbox != None and (rospy.Time.now() - time_lastbox > rospy.Duration(5)) and not moving_to_set_alt and not sample_along_heading: # added condition here so that even if smoke isn't seen, descent continues after survey
             # if nothing detected for 5 seconds, reset gimbal position, and if more than 10 seconds, go back to manual control from RC
@@ -824,7 +822,6 @@ def dofeedbackcontrol():
             if print_flags: print('forward_scan = False | above_object = False')
             if track_sampling_time: sampling_t0 = time.time()
             sample_heading_test(-fspeed_head,-hspeed_head)
-            #sample_smoke(-fspeed, -hspeed)
 
 
         #bound controls to ranges
@@ -853,17 +850,19 @@ def dofeedbackcontrol():
         # publishing
         if not sample_along_heading:
             twistmsg.linear.z = vspeed  # vertical motion
-            rcmsg.channels[7] = int(pitchcommand) #send pitch command on channel 8
-            rcmsg.channels[6] = int(yawcommand) #send yaw command on channel 7
             if print_stat: print(f'----------------Publishing Commands----------------')
             if print_stat: print(f'Pitch Command -> {pitchcommand}, Yaw Command -> {yawcommand}')
             if print_stat: print("Publishing control cmd after", time.time() - publish_rate, "seconds")
             if print_stat: print(f'x_speed: {twistmsg.linear.x}, y_speed: {twistmsg.linear.y}, z_speed: {twistmsg.linear.z}')
             twistpub.publish(twistmsg)
-            #moveAirsimGimbal(pitchcommand, yawcommand)
-            rcmsg.channels[7] = pitchcommand #send pitch command on channel 8
-            rcmsg.channels[6] = yawcommand #send yaw command on channel 7
-            rcpub.publish(rcmsg)
+
+            if EXECUTION == 'DEPLOYMENT':
+                rcmsg.channels[7] = int(pitchcommand) #send pitch command on channel 8
+                rcmsg.channels[6] = int(yawcommand) #send yaw command on channel 7
+                rcpub.publish(rcmsg)
+            else:
+                moveAirsimGimbal(pitchcommand, yawcommand)
+
             publish_rate = time.time()
 
         if print_pitch: print('Pitch command: %f' % (pitchcommand))
@@ -876,707 +875,320 @@ def dofeedbackcontrol():
         
         rate.sleep()
 
-    '''
-    yaw = 100
-    while not rospy.is_shutdown():
-        setpoint = _build_global_setpoint2(gps_lat, gps_long, gps_alt+5, yaw) # yaw = 0 is heading 90 in airsim
-        setpoint_global_pub.publish(setpoint)
-        #print('Inside Lopp')
-        #setpoint_raw = build_local_setpoint(50, 0, 10, yaw)
-        #setpoint_local_pub.publish(setpoint_raw)
-        #print(f'Publishing Command', end='\r')
-        #setpoint_raw2 = build_local_setpoint(-50, 0, 0, 0)
-        #setpoint_local_pub.publish(setpoint_raw2)
-        #setpoint_attitude_cmd_vel = build_setpoint_attitude_cmd_vel(10, 0, 0, 0, 0, 0)
-        #setpoint_attitude_pub.publish(setpoint_attitude_cmd_vel)
-    '''
-    
-    
-    
+
+
 def rise_up(dz = 5,vz=3):
-    # simple loop to go up or down, usually to get above object
-    print(f'Rising {dz}m at {vz}m/s...')
-    global twistpub, twistmsg
-    twistmsg.linear.x = 0
-    twistmsg.linear.y = 0
-    twistmsg.linear.z = vz
-    
-    for i in range(int((dz/vz)/0.2)):
+        # simple loop to go up or down, usually to get above object
+        print(f'Rising {dz}m at {vz}m/s...')
+        global twistpub, twistmsg
+        twistmsg.linear.x = 0
+        twistmsg.linear.y = 0
+        twistmsg.linear.z = vz
+        
+        for i in range(int((dz/vz)/0.2)):
+            twistpub.publish(twistmsg)
+            time.sleep(0.2)
+        
+        twistmsg.linear.z = 0
         twistpub.publish(twistmsg)
-        time.sleep(0.2)
-    
-    twistmsg.linear.z = 0
-    twistpub.publish(twistmsg)
-    return
+        return
 
 
 
 def survey_flow():
-    """
-    separated loop that keeps the drone fixed while observing the flow in the bounding box below
-    """
-    global surveying
-    global twistpub, twistmsg,rcmsg,rcpub
-    # function for starting a survey of the flow from above, and then calling a heading to travel towards
-    global fspeed,hspeed,vspeed
-    global yaw
-    print('#-------------------Beginning survey---------------------#')
+        """
+        separated loop that keeps the drone fixed while observing the flow in the bounding box below
+        """
+        global surveying
+        global twistpub, twistmsg,rcmsg,rcpub
+        # function for starting a survey of the flow from above, and then calling a heading to travel towards
+        global fspeed,hspeed,vspeed
+        global yaw
+        print('#-------------------Beginning survey---------------------#')
 
-    survey_samples = 10 # originally 10
-    survey_duration = 10
-    # hold position for _ seconds
-    twistmsg.linear.x = 0
-    twistmsg.linear.y = 0
-    twistmsg.linear.z = 0
-    twistmsg.angular.z = 0 # stop any turning
-    twistpub.publish(twistmsg)
-    rcmsg.channels[7] = pitch_down #send pitch command on channel 8
-    rcmsg.channels[6] = yaw_center #send yaw command on channel 7
-    rcpub.publish(rcmsg)
-    
-    t1 = gps_t
-    t0 = time.time()
-    vx = []
-    vy = []
-
-    #-----DEBUGGING-------#
-    if debugging:
-        for iii in range(survey_samples):
-            vx.append(1)
-            vy.append(3)
-    #---------------------#
-
-    t_log = time.time()
-    flow_prev = flow_x
-    surveying = True
-    while True: # collect samples until a certain number reached, and for at least 5 seconds
-        if not guided_mode:
-            return 0,0
-
-        if len(vx) >= survey_samples and (time.time() - t0 > 10): # do this at least 5 seconds duration
-            break
-
-        if flow_t > t1 and flow_x != flow_prev: # only use flow values after this sequence starts
-                if ~np.isnan(flow_x):   # only use if not nan
-                    vx.append(flow_x*flow_survey_gain*(alt-3))
-                    vy.append(flow_y*flow_survey_gain*(alt-3)) # gain is attenuated or amplified by altitude                   
-                flow_prev = flow_x
-                    
-        if time.time()-t0 > 30: # only do this for 15 seconds at most
-            print('#-------------------Failed to determine heading-------------------#')
-            # heading_obtained = False
-            return 0,0
-
-        if time.time()-t_log > 0.1: # do this at 10Hz at most
-            save_log() # makes sure data keeps being saved with GPS
-            t_log = time.time()
-            rcmsg.channels[7] = pitch_down #send pitch command on channel 8
-            rcmsg.channels[6] = yaw_center #send yaw command on channel 7
-            rcpub.publish(rcmsg)
-            rcpub.publish(rcmsg)
-            twistpub.publish(twistmsg)
-            # print('latest flow time',flow_t)
-
-    fspeed_surv = np.nanmean(vy) # vertical velocity
-    hspeed_surv = np.nanmean(vx)  # horizontal
-    print('#-----------------------Got heading-----------------------#')
-    print('Samples collected: vx')
-    print(vx)
-    print('Samples collected: vy')
-    print(vy)
-    print('Mean vx: %f, Mean vy: %f' % (hspeed_surv,fspeed_surv))
-    
-    # check speeds, lower below limit but keep direction
-    # shouldn't need to worry about dividing by zero, since the limits are above this
-    if abs(fspeed_surv) > limit_speed:
-        hspeed_surv *= abs(limit_speed/fspeed_surv)
-        fspeed_surv = limit_speed * fspeed_surv/abs(fspeed_surv) # keep the sign
-        
-    if abs(hspeed_surv) > limit_speed:
-        fspeed_surv *= abs(limit_speed/hspeed_surv)
-        hspeed_surv = limit_speed * hspeed_surv/abs(hspeed_surv)
-        
-    print('Heading after clipping: %f, %f' % (hspeed_surv,fspeed_surv))
-    print('#----------------------Survey complete------------------------#')
-    surveying = False
-
-    #------------------------------srijan--------------------------------#
-    print(f'yaw: {yaw}')
-    i = 0
-    twistmsg.linear.x = 0
-    twistmsg.linear.y = 0
-    twistmsg.linear.z = 0
-    yaw_speed = 0.2
-    precision = 0.009 # previously 0.005
-    low_yawspeed = False
-    if hspeed_surv > 0:
-        yaw_speed = (- 0.2)
-
-    dir_surv = math.atan2(fspeed_surv, hspeed_surv) + (3.141592653589793/2)
-    print(f'dir_surv: {dir_surv}')
-    twistmsg.angular.z = yaw_speed
-
-    while True:
-        i = i + 1
-        formated_yawspeed = "{:.5f}".format(yaw_speed)
-        if i%50000==0 and print_stat: print(f'Yaw: {yaw}, dirSurv: {dir_surv}: yawspeed: {formated_yawspeed}')
+        survey_samples = 10 # originally 10
+        survey_duration = 10
+        # hold position for _ seconds
+        twistmsg.linear.x = 0
+        twistmsg.linear.y = 0
+        twistmsg.linear.z = 0
+        twistmsg.angular.z = 0 # stop any turning
         twistpub.publish(twistmsg)
-        if low_yawspeed and (yaw <= dir_surv+precision and yaw >= dir_surv-precision):
-            break
-        elif not low_yawspeed and (yaw <= dir_surv+0.5 and yaw > dir_surv+precision):
-            yaw_speed = yaw_speed/5
-            low_yawspeed = True
-        elif not low_yawspeed and (yaw < dir_surv-precision and yaw >= dir_surv-0.5):
-            yaw_speed = yaw_speed/5
-            low_yawspeed = True
-        else:
-            yaw_speed = yaw_speed
+        rcmsg.channels[7] = pitch_down #send pitch command on channel 8
+        rcmsg.channels[6] = yaw_center #send yaw command on channel 7
+        rcpub.publish(rcmsg)
+        
+        t1 = gps_t
+        t0 = time.time()
+        vx = []
+        vy = []
+
+        #-----DEBUGGING-------#
+        if debugging:
+            for iii in range(survey_samples):
+                vx.append(1)
+                vy.append(3)
+        #---------------------#
+
+        t_log = time.time()
+        flow_prev = flow_x
+        surveying = True
+        while True: # collect samples until a certain number reached, and for at least 5 seconds
+            if not guided_mode:
+                return 0,0
+
+            if len(vx) >= survey_samples and (time.time() - t0 > 10): # do this at least 5 seconds duration
+                break
+
+            if flow_t > t1 and flow_x != flow_prev: # only use flow values after this sequence starts
+                    if ~np.isnan(flow_x):   # only use if not nan
+                        vx.append(flow_x*flow_survey_gain*(alt-3))
+                        vy.append(flow_y*flow_survey_gain*(alt-3)) # gain is attenuated or amplified by altitude                   
+                    flow_prev = flow_x
+                        
+            if time.time()-t0 > 30: # only do this for 15 seconds at most
+                print('#-------------------Failed to determine heading-------------------#')
+                # heading_obtained = False
+                return 0,0
+
+            if time.time()-t_log > 0.1: # do this at 10Hz at most
+                save_log() # makes sure data keeps being saved with GPS
+                t_log = time.time()
+                rcmsg.channels[7] = pitch_down #send pitch command on channel 8
+                rcmsg.channels[6] = yaw_center #send yaw command on channel 7
+                rcpub.publish(rcmsg)
+                rcpub.publish(rcmsg)
+                twistpub.publish(twistmsg)
+                # print('latest flow time',flow_t)
+
+        fspeed_surv = np.nanmean(vy) # vertical velocity
+        hspeed_surv = np.nanmean(vx)  # horizontal
+        print('#-----------------------Got heading-----------------------#')
+        print('Samples collected: vx')
+        print(vx)
+        print('Samples collected: vy')
+        print(vy)
+        print('Mean vx: %f, Mean vy: %f' % (hspeed_surv,fspeed_surv))
+        
+        # check speeds, lower below limit but keep direction
+        # shouldn't need to worry about dividing by zero, since the limits are above this
+        if abs(fspeed_surv) > limit_speed:
+            hspeed_surv *= abs(limit_speed/fspeed_surv)
+            fspeed_surv = limit_speed * fspeed_surv/abs(fspeed_surv) # keep the sign
+            
+        if abs(hspeed_surv) > limit_speed:
+            fspeed_surv *= abs(limit_speed/hspeed_surv)
+            hspeed_surv = limit_speed * hspeed_surv/abs(hspeed_surv)
+            
+        print('Heading after clipping: %f, %f' % (hspeed_surv,fspeed_surv))
+        print('#----------------------Survey complete------------------------#')
+        surveying = False
+
+        #------------------------------srijan--------------------------------#
+        print(f'yaw: {yaw}')
+        i = 0
+        twistmsg.linear.x = 0
+        twistmsg.linear.y = 0
+        twistmsg.linear.z = 0
+        yaw_speed = 0.2
+        precision = 0.009 # previously 0.005
+        low_yawspeed = False
+        if hspeed_surv > 0:
+            yaw_speed = (- 0.2)
+
+        dir_surv = math.atan2(fspeed_surv, hspeed_surv) + (3.141592653589793/2)
+        print(f'dir_surv: {dir_surv}')
         twistmsg.angular.z = yaw_speed
 
-    print(f'Yaw Complete: yaw - {yaw}')
+        while True:
+            i = i + 1
+            formated_yawspeed = "{:.5f}".format(yaw_speed)
+            if i%50000==0 and print_stat: print(f'Yaw: {yaw}, dirSurv: {dir_surv}: yawspeed: {formated_yawspeed}')
+            twistpub.publish(twistmsg)
+            if low_yawspeed and (yaw <= dir_surv+precision and yaw >= dir_surv-precision):
+                break
+            elif not low_yawspeed and (yaw <= dir_surv+0.5 and yaw > dir_surv+precision):
+                yaw_speed = yaw_speed/5
+                low_yawspeed = True
+            elif not low_yawspeed and (yaw < dir_surv-precision and yaw >= dir_surv-0.5):
+                yaw_speed = yaw_speed/5
+                low_yawspeed = True
+            else:
+                yaw_speed = yaw_speed
+            twistmsg.angular.z = yaw_speed
 
-    twistmsg.linear.x = 0
-    twistmsg.linear.y = 0
-    twistmsg.linear.z = 0
-    twistmsg.angular.z = 0
-    twistpub.publish(twistmsg)
-    #------------------------------srijan--------------------------------#
+        print(f'Yaw Complete: yaw - {yaw}')
 
-    return fspeed_surv,hspeed_surv
+        twistmsg.linear.x = 0
+        twistmsg.linear.y = 0
+        twistmsg.linear.z = 0
+        twistmsg.angular.z = 0
+        twistpub.publish(twistmsg)
+        #------------------------------srijan--------------------------------#
+
+        return fspeed_surv,hspeed_surv
 
 
 
 def update_kalman_filter(kf, measurement):
-    """
-    Function to update Kalman filter with a new measurement
-    """
-    kf.predict()
-    kf.update(measurement)
+        """
+        Function to update Kalman filter with a new measurement
+        """
+        kf.predict()
+        kf.update(measurement)
 
 
 
 def sample_heading_test(fspeed_head,hspeed_head):
-    """
-    keeps fixed altitude and moves along a prescribed direction obtain from flow survey prior
-    """
-    global twistpub, twistmsg,rcmsg,rcpub
-    # function for setting the flow direction obtained after surveying
-    global sampling, sampling_time, sampling_t0, track_sampling_time
-    global sample_along_heading
-    global fspeed,hspeed,vspeed
-    global horizontalerror, traverse_gain
-    global horizontalerror_smoketrack, verticalerror_smoketrack, time_lastbox_smoketrack
-    global smoketrack_pub
-    global gps_lat, gps_long, gps_alt
-    global slope_deg, head
-    global print_iter
+        """
+        keeps fixed altitude and moves along a prescribed direction obtain from flow survey prior
+        """
+        global twistpub, twistmsg,rcmsg,rcpub
+        # function for setting the flow direction obtained after surveying
+        global sampling, sampling_time, sampling_t0, track_sampling_time
+        global sample_along_heading
+        global fspeed,hspeed,vspeed
+        global horizontalerror, traverse_gain
+        global horizontalerror_smoketrack, verticalerror_smoketrack, time_lastbox_smoketrack
+        global smoketrack_pub
+        global gps_lat, gps_long, gps_alt
+        global slope_deg, head
+        global EXECUTION
 
-    sampling = True
-    if print_flags: print('sampling = True')
-    #reverse_kalman = False
+        sampling = True
+        if print_flags: print('sampling = True')
+        #reverse_kalman = False
 
-    print_iter = print_iter + 1
+        yawrate = head - slope_deg
+        # moving away from the source of the smoke
+        if (time_lastbox_smoketrack != None and (rospy.Time.now() - time_lastbox_smoketrack < rospy.Duration(7.5))):
+            fspeed = fspeed_head
+            hspeed = hspeed_head - horizontalerror_smoketrack * (20)
+            
+            x_speed = (math.cos(yaw)*fspeed + math.sin(yaw)*hspeed)*(0.2)
+            y_speed = (math.sin(yaw)*fspeed - math.cos(yaw)*hspeed)*(0.2)
+            z_speed = verticalerror_smoketrack * (1.5) 
+            z_angular = (horizontalerror_smoketrack/30) # positive val z_angular clockwise
+        else:
+            if print_stat: print("Sampling ... Yawing using Reverse Kalman Filter")
+            fspeed = 0 #fspeed_head
+            hspeed = hspeed_head - (kf.x[0, 0]) * (20)
 
-    #x_speed = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.25)
-    #y_speed = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.25)
+            x_speed = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.2)
+            y_speed = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.2)
+            z_speed = 0 
+            z_angular = -(horizontalerror_smoketrack/30)
+            #reverse_kalman = True
 
-    yawrate = head - slope_deg
-    # moving away from the source of the smoke
-    if (time_lastbox_smoketrack != None and (rospy.Time.now() - time_lastbox_smoketrack < rospy.Duration(7.5))):
-        fspeed = fspeed_head
-        hspeed = hspeed_head - horizontalerror_smoketrack * (30)
+        twistmsg.linear.x = x_speed
+        twistmsg.linear.y = y_speed
+        twistmsg.linear.z = z_speed
+        twistmsg.angular.z = z_angular
+
+        if EXECUTION == 'DEPLOYMENT':
+            rcmsg.channels[7] = 1000 #send pitch command on channel 8
+            rcmsg.channels[6] = 1500 #send yaw command on channel 7
+            rcpub.publish(rcmsg)
+        else:
+            moveAirsimGimbal(1000, 1500)
+
         
-        x_speed = (math.cos(yaw)*fspeed + math.sin(yaw)*hspeed)*(0.2)
-        y_speed = (math.sin(yaw)*fspeed - math.cos(yaw)*hspeed)*(0.2)
-        z_speed = verticalerror_smoketrack * (1.5) 
-        z_angular = (horizontalerror_smoketrack/30) # positive val z_angular clockwise
-    else:
-        if print_stat: print("Sampling ... Yawing using Reverse Kalman Filter")
-        fspeed = 0 #fspeed_head
-        hspeed = hspeed_head - (kf.x[0, 0]) * (10)
+        if time.time()-sampling_t0 < 3:
+            twistmsg.linear.x, twistmsg.linear.y, twistmsg.linear.z = 0, 0, 0
+            twistmsg.angular.z = (horizontalerror_smoketrack)
+            twistpub.publish(twistmsg)
+            track_sampling_time = False
+            if print_stat: print('Yawing at source of smoke')
+        elif time.time()-sampling_t0 < sampling_time:
+            track_sampling_time = False
+            if print_flags: print('track_sampling_time = False')
+            twistpub.publish(twistmsg)
+        elif time.time()-sampling_t0 >= sampling_time:
+            track_sampling_time = True
+            sample_along_heading = False
+            if print_flags: print('track_sampling_time = True | sample_along_heading = False')
+            print('Sampling Complete')        
+
+        return
 
-        x_speed = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.2)
-        y_speed = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.2)
-        z_speed = 0 
-        z_angular = -(horizontalerror_smoketrack/30)
-        #reverse_kalman = True
 
-    twistmsg.linear.x = x_speed
-    twistmsg.linear.y = y_speed
-    twistmsg.linear.z = z_speed
-    twistmsg.angular.z = z_angular
-    #moveAirsimGimbal(1000, 1500)
-    rcmsg.channels[7] = 1000 #send pitch command on channel 8
-    rcmsg.channels[6] = 1500 #send yaw command on channel 7
-    rcpub.publish(rcmsg)
-    
-    if time.time()-sampling_t0 < sampling_time:
-        track_sampling_time = False
-        if print_flags: print('track_sampling_time = False')
-        twistpub.publish(twistmsg)
-        rcpub.publish(rcmsg)
-        rcpub.publish(rcmsg)
-        '''
-        if not reverse_kalman:
-            x_speed = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.25)
-            y_speed = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.25)
-        else:
-            x_speed = 0
-            y_speed = 0
-        '''
-        twistpub.publish(twistmsg)
-        rcpub.publish(rcmsg)
-        rcpub.publish(rcmsg)
-    elif time.time()-sampling_t0 >= sampling_time:
-        track_sampling_time = True
-        sample_along_heading = False
-        if print_flags: print('track_sampling_time = True | sample_along_heading = False')
-        print('Sampling Complete')        
-
-    return
-
-
-
-# Function to convert longitude and latitude to Cartesian coordinates
-def llh_to_ecef(lon, lat, alt):
-    lon_rad = np.radians(lon)
-    lat_rad = np.radians(lat)
-    earth_radius = 6371000.0
-    x = (earth_radius + alt) * np.cos(lat_rad) * np.cos(lon_rad)
-    y = (earth_radius + alt) * np.cos(lat_rad) * np.sin(lon_rad)
-    z = (earth_radius + alt) * np.sin(lat_rad)
-    return x, y, z
-
-
-
-# Function to convert heading angle to a 2D unit vector
-def heading_to_unit_vector(heading_deg):
-    heading_rad = np.radians(heading_deg)
-    return np.array([np.cos(heading_rad), np.sin(heading_rad), 0])
-
-
-
-def sample_smoke(fspeed_head, hspeed_head):
-    global source_gps
-    global gps_lat, gps_long, gps_alt
-    global horizontalerror_smoketrack
-    global twistpub, twistmsg,rcmsg,rcpub
-    global sampling, sampling_time, sampling_t0, track_sampling_time
-    global sample_along_heading
-    #global fspeed,hspeed,vspeed
-
-    if (time_lastbox_smoketrack != None and (rospy.Time.now() - time_lastbox_smoketrack < rospy.Duration(7.5))):
-        fspeed_head = (fspeed_head)
-        hspeed_head = hspeed_head + (horizontalerror_smoketrack*0.5)
-
-        # Define the fixed point's GPS coordinates (adjust these values)
-        fixed_point_lat = source_gps[0]  # Fixed point's latitude
-        fixed_point_long = source_gps[1]  # Fixed point's longitude
-        fixed_point_alt = gps_alt  # Fixed point's altitude in meters
-
-        # Define forward linear velocity and angular velocity (adjust these values)
-        forward_x_vel = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.2)  # m/s
-        forward_y_vel = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.2)
-
-        # Get the current drone GPS coordinates
-        # Convert the drone's and fixed point's GPS coordinates to Cartesian coordinates
-        drone_coords = (gps_lat, gps_long, gps_alt)
-        fixed_point_coords = (fixed_point_lat, fixed_point_long, fixed_point_alt)
-
-        # Calculate the desired linear velocity vector (away from fixed point)
-        desired_forward_velocity = [forward_x_vel, forward_y_vel, 0.0]
-        magnitude = 5 #/ (abs(vector_to_fixed_point[0]) + abs(vector_to_fixed_point[1]))
-        desired_forward_velocity = [magnitude * v for v in desired_forward_velocity]
-
-        drone_cartesian = geodesic(fixed_point_coords, drone_coords).destination(point=drone_coords, bearing=0)
-        fixed_point_cartesian = (0.0, 0.0, 0.0)  # Fixed point is at the origin in this coordinate system
-
-        # Calculate the position vector from drone to fixed point in Cartesian coordinates
-        vector_to_fixed_point = [fixed_point_cartesian[0] - drone_cartesian[0], fixed_point_cartesian[1] - drone_cartesian[1], fixed_point_cartesian[2] - drone_cartesian[2]]
-
-        vector_perp2plane = [0.0, 0.0, 0.1]
-        vector_tang2vec2fixedpoint = np.cross(vector_perp2plane, vector_to_fixed_point)
-        magnitude_tang = 1 #horizontal_velocity
-        desired_tangential_velocity = [magnitude_tang * vtang for vtang in vector_tang2vec2fixedpoint]
-
-        total_linear_vel  = desired_forward_velocity + desired_tangential_velocity
-
-        # Get the current drone GPS coordinates
-        # Convert the drone's and fixed point's GPS coordinates to Cartesian coordinates
-        drone_coords = (gps_lat, gps_long, gps_alt)
-        fixed_point_coords = (fixed_point_lat, fixed_point_long, fixed_point_alt)
-
-        #angle_between_vectors_rad = np.arctan2(vect2[1], vect2[0]) - np.arctan2(vect1[1], vect1[0])
-        drone_head = head 
-        vector_head = calculate_heading(fixed_point_lat, fixed_point_long, drone_coords[0], drone_coords[1])
-        angle_between_vectors_deg = drone_head - vector_head
-
-        # Create a Twist message and set linear and angular velocities
-        print(f'Kalman: ({total_linear_vel[0]}, {total_linear_vel[1]}), {yaw}, {(angle_between_vectors_deg)}')
-        twistmsg.linear.x = total_linear_vel[0] 
-        twistmsg.linear.y = total_linear_vel[1]
-        twistmsg.linear.z = 0 #desired_linear_velocity[2]
-        twistmsg.angular.x = 0
-        twistmsg.angular.y = 0
-        if angle_between_vectors_deg is not None: 
-            twistmsg.angular.z = (angle_between_vectors_deg) * (0.0005)
-        else:
-            twistmsg.angular.z = 0
-    else:
-        fspeed_head = 0
-        hspeed_head = hspeed_head + (-kf.x[0, 0])
-
-        # Define the fixed point's GPS coordinates (adjust these values)
-        fixed_point_lat = source_gps[0]  # Fixed point's latitude
-        fixed_point_long = source_gps[1]  # Fixed point's longitude
-        fixed_point_alt = gps_alt  # Fixed point's altitude in meters
-
-        # Define forward linear velocity and angular velocity (adjust these values)
-        forward_x_vel = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.3)  # m/s
-        forward_y_vel = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.3)
-
-        # Get the current drone GPS coordinates
-        # Convert the drone's and fixed point's GPS coordinates to Cartesian coordinates
-        drone_coords = (gps_lat, gps_long, gps_alt)
-        fixed_point_coords = (fixed_point_lat, fixed_point_long, fixed_point_alt)
-
-        # Calculate the desired linear velocity vector (away from fixed point)
-        desired_forward_velocity = [forward_x_vel, forward_y_vel, 0.0]
-        magnitude = 5 #/ (abs(vector_to_fixed_point[0]) + abs(vector_to_fixed_point[1]))
-        desired_forward_velocity = [magnitude * v for v in desired_forward_velocity]
-
-        drone_cartesian = geodesic(fixed_point_coords, drone_coords).destination(point=drone_coords, bearing=0)
-        fixed_point_cartesian = (0.0, 0.0, 0.0)  # Fixed point is at the origin in this coordinate system
-
-        # Calculate the position vector from drone to fixed point in Cartesian coordinates
-        vector_to_fixed_point = [fixed_point_cartesian[0] - drone_cartesian[0], fixed_point_cartesian[1] - drone_cartesian[1], fixed_point_cartesian[2] - drone_cartesian[2]]
-
-        vector_perp2plane = [0.0, 0.0, 0.1]
-        vector_tang2vec2fixedpoint = np.cross(vector_perp2plane, vector_to_fixed_point)
-        magnitude_tang = 1 #horizontal_velocity
-        desired_tangential_velocity = [magnitude_tang * vtang for vtang in vector_tang2vec2fixedpoint]
-
-        total_linear_vel  = desired_forward_velocity + desired_tangential_velocity
-
-
-
-        #angle_between_vectors_rad = np.arctan2(vect2[1], vect2[0]) - np.arctan2(vect1[1], vect1[0])
-        drone_head = head 
-        vector_head = calculate_heading(fixed_point_coords[0], fixed_point_coords[1], drone_coords[0], drone_coords[1])
-        angle_between_vectors_deg = vector_head - drone_head
-
-        print(f'R. Kalman: ({total_linear_vel[0]}, {total_linear_vel[1]}), {yaw}, {angle_between_vectors_deg}')
-        twistmsg.linear.x = total_linear_vel[0] 
-        twistmsg.linear.y = total_linear_vel[1] 
-        twistmsg.linear.z = 0 #desired_linear_velocity[2]
-        twistmsg.angular.x = 0
-        twistmsg.angular.y = 0
-        if angle_between_vectors_deg is not None: 
-            twistmsg.angular.z = (angle_between_vectors_deg) * (-0.01)
-        else:
-            twistmsg.angular.z = 0
-
-
-    if time.time()-sampling_t0 < sampling_time:
-        track_sampling_time = False
-        if print_flags: print('track_sampling_time = False')
-        # Publish the Twist message to control the drone
-        print(f'')
-        twistpub.publish(twistmsg)
-        rcpub.publish(rcmsg)
-        rcpub.publish(rcmsg)
-    elif time.time()-sampling_t0 >= sampling_time:
-        track_sampling_time = True
-        sample_along_heading = False
-        if print_flags: print('track_sampling_time = True | sample_along_heading = False')
-        print('Sampling Complete')
-
-
-    #moveAirsimGimbal(1000, 1500)
-    rcmsg.channels[7] = 1000 #send pitch command on channel 8
-    rcmsg.channels[6] = 1500 #send yaw command on channel 7
-    rcpub.publish(rcmsg)
-
-    return
-
-
-
-def calculate_heading(lat1, lon1, lat2, lon2):
-    # Convert latitude and longitude from degrees to radians
-    lat1 = math.radians(lat1)
-    lon1 = math.radians(lon1)
-    lat2 = math.radians(lat2)
-    lon2 = math.radians(lon2)
-
-    # Calculate the difference in longitudes
-    delta_lon = lon2 - lon1
-
-    # Calculate the heading angle (bearing)
-    y = math.sin(delta_lon) * math.cos(lat2)
-    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(delta_lon)
-    heading_rad = math.atan2(y, x)
-
-    # Convert the heading angle from radians to degrees
-    heading_deg = math.degrees(heading_rad)
-
-    # Ensure the heading angle is in the range [0, 360)
-    heading_deg = (heading_deg + 360) % 360
-
-    return heading_deg
-
-
-
-
-'''
-def sample_smoke2(fspeed_head, hspeed_head):
-    global source_gps
-    global gps_lat, gps_long, gps_alt
-    global horizontalerror_smoketrack
-    global twistpub, twistmsg,rcmsg,rcpub
-    global sampling, sampling_time, sampling_t0, track_sampling_time
-    global sample_along_heading
-    #global fspeed,hspeed,vspeed
-
-    if (time_lastbox_smoketrack != None and (rospy.Time.now() - time_lastbox_smoketrack < rospy.Duration(7.5))):
-        hspeed_head = hspeed_head - (horizontalerror_smoketrack)
-
-        # Define the fixed point's GPS coordinates (adjust these values)
-        fixed_point_lat = source_gps[0]  # Fixed point's latitude
-        fixed_point_long = source_gps[1]  # Fixed point's longitude
-        fixed_point_alt = gps_alt  # Fixed point's altitude in meters
-
-        # Define forward linear velocity and angular velocity (adjust these values)
-        forward_x_vel = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.25)  # m/s
-        forward_y_vel = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.25)
-        angular_velocity = 0.001 # horizontalerror_smoketrack / 10  # rad/s
-
-
-        # Get the current drone GPS coordinates
-
-        # Convert the drone's and fixed point's GPS coordinates to Cartesian coordinates
-        drone_coords = (gps_lat, gps_long, gps_alt)
-        fixed_point_coords = (fixed_point_lat, fixed_point_long, fixed_point_alt)
-
-        drone_cartesian = geodesic(fixed_point_coords, drone_coords).destination(point=drone_coords, bearing=0)
-        fixed_point_cartesian = (0.0, 0.0, 0.0)  # Fixed point is at the origin in this coordinate system
-
-        # Calculate the position vector from drone to fixed point in Cartesian coordinates
-        vector_to_fixed_point = [fixed_point_cartesian[0] - drone_cartesian[0], fixed_point_cartesian[1] - drone_cartesian[1], fixed_point_cartesian[2] - drone_cartesian[2]]
-
-        # Calculate the desired linear velocity vector (away from fixed point)
-        desired_forward_velocity = [forward_x_vel, forward_y_vel, 0.0]
-        magnitude = 5 #/ (abs(vector_to_fixed_point[0]) + abs(vector_to_fixed_point[1]))
-        desired_forward_velocity = [magnitude * v for v in desired_forward_velocity]
-
-        vector_perp2plane = [0.0, 0.0, 0.1]
-        vector_tang2vec2fixedpoint = np.cross(vector_perp2plane, vector_to_fixed_point)
-        magnitude_tang = 1 #horizontal_velocity
-        desired_tangential_velocity = [magnitude_tang * vtang for vtang in vector_tang2vec2fixedpoint]
-
-        total_linear_vel  = desired_forward_velocity + desired_tangential_velocity
-        # Calculate the desired angular velocity to rotate around the fixed point
-
-        # Convert the two points and the drone's position to ECEF coordinates
-        source_ecef = llh_to_ecef(source_gps[1], source_gps[0], 0.0)
-        drone_ecef = llh_to_ecef(gps_long, gps_lat, 0.0)
-
-        # Calculate vectors from one point to the other and from drone's position to one of the points
-        vector_from_source_to_drone = np.array(drone_ecef) - np.array(source_ecef)
-
-        # Convert drone's heading to a 2D unit vector
-        drone_heading_vector = heading_to_unit_vector(yaw) #heading_to_unit_vector(head)
-
-        # Normalize the vectors
-        vector_from_source_to_drone_normalized = vector_from_source_to_drone / np.linalg.norm(vector_from_source_to_drone)
-        drone_heading_vector_normalized = drone_heading_vector / np.linalg.norm(drone_heading_vector)
-
-        # Calculate the angles (in degrees) between the vectors
-        #angle_between_vectors_rad = np.arccos(np.dot(vector_from_source_to_drone_normalized, drone_heading_vector_normalized))
-        #angle_between_vectors_deg = np.rad2deg(angle_between_vectors_rad)
-        vect2 = vector_from_source_to_drone_normalized
-        vect1 = drone_heading_vector_normalized
-        angle_between_vectors_rad = np.arctan2(vect2[1], vect2[0]) - np.arctan2(vect1[1], vect1[0])
-        angle_between_vectors_deg = np.rad2deg(angle_between_vectors_rad)
-
-        # Create a Twist message and set linear and angular velocities
-        print(f'Kalman: ({total_linear_vel[0]}, {total_linear_vel[1]}), {yaw}, {(angle_between_vectors_deg)}')
-        twistmsg.linear.x = total_linear_vel[0] * 0.1
-        twistmsg.linear.y = total_linear_vel[1] * 0.1
-        twistmsg.linear.z = 0 #desired_linear_velocity[2]
-        twistmsg.angular.x = 0
-        twistmsg.angular.y = 0
-        if angle_between_vectors_deg is not None: 
-            twistmsg.angular.z = (angle_between_vectors_deg) * (-0.0005)
-        else:
-            twistmsg.angular.z = 0
-    else:
-        fspeed_head = 0
-        hspeed_head = hspeed_head + (horizontalerror_smoketrack)
-
-        # Define the fixed point's GPS coordinates (adjust these values)
-        fixed_point_lat = source_gps[0]  # Fixed point's latitude
-        fixed_point_long = source_gps[1]  # Fixed point's longitude
-        fixed_point_alt = gps_alt  # Fixed point's altitude in meters
-
-        # Define forward linear velocity and angular velocity (adjust these values)
-        forward_x_vel = (math.cos(yaw)*fspeed_head + math.sin(yaw)*hspeed_head)*(0.25)  # m/s
-        forward_y_vel = (math.sin(yaw)*fspeed_head - math.cos(yaw)*hspeed_head)*(0.25)
-        angular_velocity = 0.001 # horizontalerror_smoketrack / 10  # rad/s
-
-
-        # Get the current drone GPS coordinates
-
-        # Convert the drone's and fixed point's GPS coordinates to Cartesian coordinates
-        drone_coords = (gps_lat, gps_long, gps_alt)
-        fixed_point_coords = (fixed_point_lat, fixed_point_long, fixed_point_alt)
-
-        drone_cartesian = geodesic(fixed_point_coords, drone_coords).destination(point=drone_coords, bearing=0)
-        fixed_point_cartesian = (0.0, 0.0, 0.0)  # Fixed point is at the origin in this coordinate system
-
-        # Calculate the position vector from drone to fixed point in Cartesian coordinates
-        vector_to_fixed_point = [fixed_point_cartesian[0] - drone_cartesian[0], fixed_point_cartesian[1] - drone_cartesian[1], fixed_point_cartesian[2] - drone_cartesian[2]]
-
-        # Calculate the desired linear velocity vector (away from fixed point)
-        desired_forward_velocity = [forward_x_vel, forward_y_vel, 0.0]
-        magnitude = 5 #/ (abs(vector_to_fixed_point[0]) + abs(vector_to_fixed_point[1]))
-        desired_forward_velocity = [magnitude * v for v in desired_forward_velocity]
-
-        vector_perp2plane = [0.0, 0.0, 0.1]
-        vector_tang2vec2fixedpoint = np.cross(vector_perp2plane, vector_to_fixed_point)
-        magnitude_tang = 1 #horizontal_velocity
-        desired_tangential_velocity = [magnitude_tang * vtang for vtang in vector_tang2vec2fixedpoint]
-
-        total_linear_vel  = desired_forward_velocity + desired_tangential_velocity
-        # Calculate the desired angular velocity to rotate around the fixed point
-
-        # Convert the two points and the drone's position to ECEF coordinates
-        source_ecef = llh_to_ecef(source_gps[1], source_gps[0], 0.0)
-        drone_ecef = llh_to_ecef(gps_long, gps_lat, 0.0)
-
-        # Calculate vectors from one point to the other and from drone's position to one of the points
-        vector_from_source_to_drone = np.array(drone_ecef) - np.array(source_ecef)
-
-        # Convert drone's heading to a 3D unit vector
-        drone_heading_vector = heading_to_unit_vector(yaw) #heading_to_unit_vector(head)
-
-        # Normalize the vectors
-        vector_from_source_to_drone_normalized = vector_from_source_to_drone / np.linalg.norm(vector_from_source_to_drone)
-        drone_heading_vector_normalized = drone_heading_vector / np.linalg.norm(drone_heading_vector)
-
-        # Calculate the angles (in degrees) between the vectors
-        #angle_between_vectors_rad = np.arccos(np.dot(vector_from_source_to_drone_normalized, drone_heading_vector_normalized))
-        #angle_between_vectors_deg = np.rad2deg(angle_between_vectors_rad)
-
-        vect2 = vector_from_source_to_drone_normalized
-        vect1 = drone_heading_vector_normalized
-        angle_between_vectors_rad = np.arctan2(vect2[1], vect2[0]) - np.arctan2(vect1[1], vect1[0])
-        angle_between_vectors_deg = np.rad2deg(angle_between_vectors_rad)
-
-        print(f'R. Kalman: ({total_linear_vel[0]}, {total_linear_vel[1]}), {yaw}, {angle_between_vectors_deg}')
-        twistmsg.linear.x = total_linear_vel[0] 
-        twistmsg.linear.y = - total_linear_vel[1] 
-        twistmsg.linear.z = 0 #desired_linear_velocity[2]
-        twistmsg.angular.x = 0
-        twistmsg.angular.y = 0
-        if angle_between_vectors_deg is not None: 
-            twistmsg.angular.z = (angle_between_vectors_deg) * (-0.0005)
-        else:
-            twistmsg.angular.z = 0
-
-
-    if time.time()-sampling_t0 < sampling_time:
-        track_sampling_time = False
-        if print_flags: print('track_sampling_time = False')
-        # Publish the Twist message to control the drone
-        print(f'')
-        twistpub.publish(twistmsg)
-        rcpub.publish(rcmsg)
-        rcpub.publish(rcmsg)
-    elif time.time()-sampling_t0 >= sampling_time:
-        track_sampling_time = True
-        sample_along_heading = False
-        if print_flags: print('track_sampling_time = True | sample_along_heading = False')
-        print('Sampling Complete')
-
-
-    moveAirsimGimbal(1000, 1500)
-    return
-'''
 
 def save_log():
-    """
-    writing data to csv
-    """
-    fid.write('%f,%f,%f,%f,%f,%f,%f,%f,%s,%s,%s,%s,%f,%f,%s,%f,%f,%f,%f,%f\n' % 
-        (time.time(),gps_t,gps_x,gps_y,alt,gps_lat,gps_long,gps_alt_rel,str(surveying),str(sampling),str(move_up),str(above_object),pitchcommand,sizeerror,str(OPT_FLOW),flow_x,flow_y,vspeed,fspeed,hspeed))
+        """
+        writing data to csv
+        """
+        fid.write('%f,%f,%f,%f,%f,%f,%f,%f,%s,%s,%s,%s,%f,%f,%s,%f,%f,%f,%f,%f\n' % 
+            (time.time(),gps_t,gps_x,gps_y,alt,gps_lat,gps_long,gps_alt_rel,str(surveying),str(sampling),str(move_up),str(above_object),pitchcommand,sizeerror,str(OPT_FLOW),flow_x,flow_y,vspeed,fspeed,hspeed))
     
 
 
 if __name__ == '__main__':
-    print("Initializing feedback node...")
-    rospy.init_node('feedbacknode', anonymous=False)
-    twist_pub = rospy.Publisher('/mavros/setpoint_position/local', PoseStamped, queue_size=1)
-    
-    '''
-    # TAKEOFF
-    takeoff = CommandTOLRequest()
-    takeoff.min_pitch = 0
-    takeoff.yaw = 0
-    takeoff.latitude = 47.641468
-    takeoff.longitude = -122.140165
-    takeoff.altitude = -10
-    print("Taking off", end ="->")
-    fly = rospy.ServiceProxy('/mavros/cmd/takeoff', CommandTOL)
-    resp = fly(takeoff)
-    print(resp)
-    time.sleep(2) 
+        print("Initializing feedback node...")
+        rospy.init_node('feedbackcontrol_node', anonymous=False)
+        twist_pub = rospy.Publisher('/mavros/setpoint_position/local', PoseStamped, queue_size=1)
+        
+        #global EXECUTION
+        print(f'Executing in ==> {EXECUTION}')
+        
+        if EXECUTION == 'SIMULATION':
+                # TAKEOFF
+                takeoff = CommandTOLRequest()
+                takeoff.min_pitch = 0
+                takeoff.yaw = 0
+                takeoff.latitude = 47.641468
+                takeoff.longitude = -122.140165
+                takeoff.altitude = -10
+                print("Taking off", end ="->")
+                fly = rospy.ServiceProxy('/mavros/cmd/takeoff', CommandTOL)
+                resp = fly(takeoff)
+                print(resp)
+                time.sleep(2) 
 
-    # ARM the drone
-    arm = CommandBoolRequest()
-    arm.value = True
-    print("Arming - 1st attempt", end ="->")
-    arming = rospy.ServiceProxy('/mavros/cmd/arming', CommandBool)
-    resp = arming(arm)
-    print(resp)
-    time.sleep(5)
-    print("Arming - 2nd attempt", end ="->")
-    resp = arming(arm)
-    print(resp)
-    time.sleep(5)
+                # ARM the drone
+                arm = CommandBoolRequest()
+                arm.value = True
+                print("Arming - 1st attempt", end ="->")
+                arming = rospy.ServiceProxy('/mavros/cmd/arming', CommandBool)
+                resp = arming(arm)
+                print(resp)
+                time.sleep(5)
+                print("Arming - 2nd attempt", end ="->")
+                resp = arming(arm)
+                print(resp)
+                time.sleep(5)
 
-    # Move to set posiiton
-    print("Moving...")
-    go = PoseStamped()
-    go.pose.position.x = 0
-    go.pose.position.y = 0
-    go.pose.position.z = 20
-    go.pose.orientation.z = -0.8509035
-    go.pose.orientation.w = 0.525322
-    twist_pub.publish(go)
-    time.sleep(0.2)
+                # Move to set posiiton
+                print("Moving...")
+                go = PoseStamped()
+                go.pose.position.x = 0
+                go.pose.position.y = 0
+                go.pose.position.z = 20
+                go.pose.orientation.z = -0.8509035
+                go.pose.orientation.w = 0.525322
+                twist_pub.publish(go)
+                time.sleep(0.2)
 
-    offboard()
-    
-    
-    for i in range(150):
-        #Start poition (X=-66495.023860,Y=49467.376329,Z=868.248719)
-        # Move to set posiiton
-        if (i+1)%10 == 0: print(f"Moving...{i+1}")
-        go = PoseStamped()
-        go.pose.position.x = -17
-        go.pose.position.y = 10
-        go.pose.position.z = 250 # previuosly 250 with 55 fov of AirSim Cam
-        go.pose.orientation.z = 1
-        twist_pub.publish(go)
-        time.sleep(0.2)
-    
-    
-    print("GOING AUTONOMOUS")
-    time.sleep(5)
-    '''
-    try:
-        dofeedbackcontrol()
-    except rospy.ROSInterruptException:
-        pass
+                offboard()
+                
+                for i in range(150): # originally 150
+                    #Start poition (X=-66495.023860,Y=49467.376329,Z=868.248719)
+                    # Move to set posiiton
+                    if (i+1)%10 == 0: print(f"Moving...{i+1}")
+                    go = PoseStamped()
+                    go.pose.position.x = -17
+                    go.pose.position.y = 10
+                    go.pose.position.z = 250 # previuosly 250 with 55 fov of AirSim Camera
+                    go.pose.orientation.z = 1
+                    twist_pub.publish(go)
+                    time.sleep(0.2)
+                
+                #print("GOING AUTONOMOUS")
+                time.sleep(5)
+        
+        
+        try:
+            dofeedbackcontrol()
+        except rospy.ROSInterruptException:
+            pass
 
 
