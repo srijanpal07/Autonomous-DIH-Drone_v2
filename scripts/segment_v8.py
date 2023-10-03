@@ -33,25 +33,25 @@ global imgsz, model, device, names, max_det, max_delay
 #global engine, half
 
 global threshold
-threshold = 218 # white smoke
+threshold = 220 # white smoke
 
 #------------------------OPTIONS---------------------#
 max_delay = 0.5 # [seconds] delay between last detection and current image after which to just drop images to catch up
 
-conf_thres=0.8 #previously 0.25  # confidence threshold
-iou_thres=0.05  # NMS IOU threshold
-max_det=100 # maximum detections per image
-imgsz = (352,448) # previously [352,448] # scaled image size to run inference on #inference size (height, width) 
+conf_thres = 0.25 #previously 0.25  # confidence threshold
+iou_thres = 0.6  # previously 0.7 # NMS IOU threshold
+max_det = 100 # maximum detections per image
+imgsz = (192,224) # previously [352,448] # scaled image size to run inference on #inference size (height, width) 
 device='cpu' # device='cuda:0'
 retina_masks=False
 
 save_txt = False
 save_img = False 
 save_crop = False 
-hide_labels=False,  # hide labels
-hide_conf=False,  # hide confidences
-VIEW_IMG=True
-VIEW_MASK=False
+hide_labels = False,  # hide labels
+hide_conf = False,  # hide confidences
+VIEW_IMG = True
+VIEW_MASK = False
 SAVE_IMG = False
 save_format = False #'.avi' or '.raw'
 #-----------------------------------------------------#
@@ -235,7 +235,7 @@ def init_detection_node():
     global imgsz, model, device
     
     print('Initializing YOLOv8 segmentation model')
-    model= YOLO(YOLOv5_ROOT / 'yolov8-best.pt')
+    model= YOLO(YOLOv5_ROOT / 'yolov8s-best.pt') # model= YOLO(YOLOv5_ROOT / 'yolov8-best.pt')
 
     # initializing video file
     if save_format=='.avi':
