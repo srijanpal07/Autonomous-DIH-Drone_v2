@@ -8,7 +8,7 @@ from rospy.client import init_node
 from sensor_msgs.msg import Image
 from vision_msgs.msg import Detection2D
 from sensor_msgs.msg import TimeReference
-from std_msgs.msg import String
+from std_msgs.msg import Float64, String
 import numpy as np
 import cv2
 import os, re
@@ -32,8 +32,10 @@ global pub, box, video, timelog
 global imgsz, model, device, names, max_det, max_delay
 #global engine, half
 
-global threshold
+global threshold, reduced_threshold
 threshold = 240 # white smoke
+global sampling_time_passed
+sampling_time_passed = 0 
 
 #------------------------OPTIONS---------------------#
 max_delay = 0.5 # [seconds] delay between last detection and current image after which to just drop images to catch up
@@ -93,6 +95,16 @@ font_size = 1
 font_color = BLACK
 font_thickness = 2
 
+
+def time_info_callback(data):
+    global threshold, sampling_time_passed
+
+    #rospy.loginfo(f"Received timestamp: {data.data} seconds") 
+    if int(data.data) - sampling_time_passed > 1:
+        sampling_time_passed = sampling_time_passed + 1
+        if sampling_time_passed % 2 == 0:
+            threshold = threshold - 1
+    print(f"Received timestamp: {sampling_time_passed} secs ------- threshold reduced to : threshold: {threshold}")
 
 
 def imagecallback(img):
@@ -163,10 +175,15 @@ def imagecallback(img):
                     y_mean = int(y_mean_norm * annotated_frame.shape[1])
                     annotated_frame = cv2.circle(annotated_frame, (y_mean, x_mean), 10, (255, 0, 0), -1)
 
-                    wind_h, wind_w = 960, 540 # (192,224)
-                    cv2.namedWindow('Segmentation V8', cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
-                    cv2.resizeWindow('Segmentation V8', wind_h, wind_w)
-                    cv2.imshow('Segmentation V8', annotated_frame)
+                    #wind_h, wind_w = 960, 540 # (192,224)
+                    scale_percent = 25 # percent of original size
+                    width = int(annotated_frame.shape[1] * scale_percent / 100)
+                    height = int(annotated_frame.shape[0] * scale_percent / 100)
+                    dim = (width, height)
+                    annotated_frame = cv2.resize(annotated_frame, dim, interpolation = cv2.INTER_AREA)
+                    cv2.namedWindow('Smoke Segmentation', cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
+                    #cv2.resizeWindow('Smoke Segmentation', wind_h, wind_w)
+                    cv2.imshow('Smoke Segmentation', annotated_frame)
                     cv2.waitKey(1)
 
                 box.header.seq = img.header.seq
@@ -180,7 +197,7 @@ def imagecallback(img):
                 box.bbox.size_x = white_pixel_count
                 pub.publish(box)
                 
-                print(f'No fo white pixels: {white_pixel_count}', end='\r')
+                #print(f'No of white pixels: {white_pixel_count}', end='\r')
                 text_to_image = 'processed'
                 img_numpy = cv2.putText(img_numpy,text_to_image,(10,30),font, font_size, font_color, font_thickness, cv2.LINE_AA)
 
@@ -243,6 +260,7 @@ def init_detection_node():
     # initializing node
     rospy.init_node('segmentation_node', anonymous=False)
     rospy.Subscriber('front_centre_cam', Image, imagecallback)
+    rospy.Subscriber('sampling_time_info_topic', Float64, time_info_callback)
     
     rospy.spin()
 

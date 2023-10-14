@@ -114,13 +114,22 @@ def imagecallback(img):
             if keypoints.all() is not None:
                 try:
                     source_x, source_y = int(keypoints[0][1]), int(keypoints[0][0])
-                    wind_h, wind_w = 960, 540
-                    cv2.namedWindow('Keypoints V8', cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
-                    cv2.resizeWindow('Keypoints V8', wind_h, wind_w)
-                    img_numpy = cv2.circle(img_numpy, (source_y, source_x), 5, (255, 0, 0), -1)
-                    img_numpy = cv2.circle(img_numpy, (int(keypoints[1][0]), int(keypoints[1][1])), 5, (0, 255, 0), -1)
-                    img_numpy = cv2.circle(img_numpy, (int(keypoints[2][0]), int(keypoints[2][1])), 5, (0, 0, 255), -1)
-                    cv2.imshow('Keypoints V8', img_numpy)
+
+                    # wind_h, wind_w = 960, 540
+                    # cv2.namedWindow('Smoke Keypoints', cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
+                    # cv2.resizeWindow('Smoke Keypoints', wind_h, wind_w)
+                    img_numpy = cv2.circle(img_numpy, (source_y, source_x), 10, (255, 0, 0), -1)
+                    img_numpy = cv2.circle(img_numpy, (int(keypoints[1][0]), int(keypoints[1][1])), 10, (0, 255, 0), -1)
+                    img_numpy = cv2.circle(img_numpy, (int(keypoints[2][0]), int(keypoints[2][1])), 10, (0, 0, 255), -1)
+                    
+                    scale_percent = 25 # percent of original size
+                    width = int(img_numpy.shape[1] * scale_percent / 100)
+                    height = int(img_numpy.shape[0] * scale_percent / 100)
+                    dim = (width, height)
+                    # resize image
+                    img_numpy_resize = cv2.resize(img_numpy, dim, interpolation = cv2.INTER_AREA)
+                    
+                    cv2.imshow('Smoke Keypoints', img_numpy_resize)
                     cv2.waitKey(1)
                     
                     #print(f'Source: {source_x}, {source_y}, img_shape: {img_numpy.shape}')

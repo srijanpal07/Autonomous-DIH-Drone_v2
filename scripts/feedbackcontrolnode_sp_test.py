@@ -37,12 +37,16 @@ global horizontalerror_smoketrack_list
 global head, slope_deg
 global source_gps, drone_gps
 global setpoint_global_pub
+global yawing_using_kalman_filter
+global proportional_gain
 
 horizontalerror_smoketrack_list =[]
 time_lastbox, time_lastbox_smoketrack = None, None
 head, slope_deg = 0.0, 0.0
 source_gps = [0.0, 0.0, 0.0] # lattitude, longitude and altitude
 drone_gps = [0.0, 0.0, 0.0] # lattitude, longitude and altitude
+yawing_using_kalman_filter = False
+proportional_gain = 12
 
 
 
@@ -449,49 +453,52 @@ def boundingbox_callback(box):
 
 
 def segmentation_callback(box):
-        global horizontalerror_smoketrack, verticalerror_smoketrack, sizeerror_smoketrack, horizontalerror_smoketrack_list
-        global time_lastbox_smoketrack, pitchcommand, yawcommand
-        global MOVE_ABOVE, OPT_FLOW
-        global kf, previous_yaw_measurements
-        global sampling
+    global horizontalerror_smoketrack, verticalerror_smoketrack, sizeerror_smoketrack, horizontalerror_smoketrack_list
+    global time_lastbox_smoketrack, pitchcommand, yawcommand
+    global MOVE_ABOVE, OPT_FLOW
+    global kf, previous_yaw_measurements
+    global sampling
+    global yawing_using_kalman_filter
+    
+    # positive errors give right, up
+    if box.bbox.center.x != -1 and box.bbox.size_x > 2000:
+        if print_stat: 
+            if sampling: print("Sampling ... Yawing using Segmentation")
+        yawing_using_kalman_filter  = False    
+        time_lastbox_smoketrack = rospy.Time.now()
+        bboxsize = (box.bbox.size_x + box.bbox.size_y)/2 # take the average so that a very thin, long box will still be seen as small
         
-        # positive errors give right, up
-        if box.bbox.center.x != -1 and box.bbox.size_x > 2500:
-            if print_stat: 
-                if sampling: print("Sampling ... Yawing using Segmentation")
-            time_lastbox_smoketrack = rospy.Time.now()
-            bboxsize = (box.bbox.size_x + box.bbox.size_y)/2 # take the average so that a very thin, long box will still be seen as small
-            
-            if not above_object: # different bbox size desired for approach and above stages for hybrid mode
-                if print_stat: print("Not above object ... ")
-                sizeerror_smoketrack = 0 # setpoint_size_approach - bboxsize # if box is smaller than setpoit, error is positive
-            else:
-                if print_stat: print("above_object was set to true previously")
-                sizeerror_smoketrack = 0 # setpoint_size - bboxsize # if box is smaller than setpoit, error is positive
-
-            if print_size_error: print('Setpoint - bbox (sizeerror) = %f' % sizeerror_smoketrack)
-
-            if not OPT_FLOW:
-                if print_stat: print("OPT_FLOW is set to False: Optical flow not running")   
-                horizontalerror_smoketrack = .5-box.bbox.center.x # if box center is on LHS of image, error is positive
-                verticalerror_smoketrack = .5-box.bbox.center.y # if box center is on upper half of image, error is positive 
-                
-                # Update the Kalman filter with the new measurement
-                update_kalman_filter(kf, horizontalerror_smoketrack)
-                previous_yaw_measurements.append(horizontalerror_smoketrack)
-                
-                if print_stat: print(f'Horzontal error: {round(horizontalerror_smoketrack, 5)}, Vertical error: {round(verticalerror, 5)}')
-
-            if pitchcommand < pitch_thresh and bboxsize > 0.75: # if close and gimbal pitched upward, move to get above the object
-                MOVE_ABOVE = True
-                if print_stat: print('Gimbal pitched upward moving above to get above object ... : MOVE_ABOVE is set to True')
-
+        if not above_object: # different bbox size desired for approach and above stages for hybrid mode
+            if print_stat: print("Not above object ... ")
+            sizeerror_smoketrack = 0 # setpoint_size_approach - bboxsize # if box is smaller than setpoit, error is positive
         else:
-            if print_stat: 
-                if sampling: print("Sampling ... Yawing using Kalman Filter")
-            horizontalerror_smoketrack = kf.x[0, 0] 
+            if print_stat: print("above_object was set to true previously")
+            sizeerror_smoketrack = 0 # setpoint_size - bboxsize # if box is smaller than setpoit, error is positive
 
-        return
+        if print_size_error: print('Setpoint - bbox (sizeerror) = %f' % sizeerror_smoketrack)
+
+        if not OPT_FLOW:
+            if print_stat: print("OPT_FLOW is set to False: Optical flow not running")   
+            horizontalerror_smoketrack = .5-box.bbox.center.x # if box center is on LHS of image, error is positive
+            verticalerror_smoketrack = .5-box.bbox.center.y # if box center is on upper half of image, error is positive 
+            
+            # Update the Kalman filter with the new measurement
+            update_kalman_filter(kf, horizontalerror_smoketrack)
+            previous_yaw_measurements.append(horizontalerror_smoketrack)
+            
+            if print_stat: print(f'Horzontal error: {round(horizontalerror_smoketrack, 5)}, Vertical error: {round(verticalerror, 5)}')
+
+        if pitchcommand < pitch_thresh and bboxsize > 0.75: # if close and gimbal pitched upward, move to get above the object
+            MOVE_ABOVE = True
+            if print_stat: print('Gimbal pitched upward moving above to get above object ... : MOVE_ABOVE is set to True')
+
+    else:
+        if print_stat: 
+            if sampling: print("Sampling ... Yawing using Kalman Filter")
+        horizontalerror_smoketrack = kf.x[0, 0]
+        yawing_using_kalman_filter  = True
+
+    return
 
 
 
@@ -623,14 +630,15 @@ def set_yaw(yaw_angle_degrees):
 
 
 # same as twiststamped the one already being used in the code
-def send_velocity_command(forward_speed, lateral_speed, correction_yaw_rate):
+def send_velocity_command(forward_speed, lateral_speed, vertical_speed, correction_yaw_rate):
     global twist_stamped_pub, yaw
     
     cmd_vel = TwistStamped()
     cmd_vel.header.stamp = rospy.Time.now()
 
-    x_speed = (math.cos(yaw)*forward_speed + math.sin(yaw)*lateral_speed)*(0.25)
-    y_speed = (math.sin(yaw)*forward_speed - math.cos(yaw)*lateral_speed)*(0.25)
+    x_speed = (math.cos(yaw)*forward_speed + math.sin(yaw)*lateral_speed)*(0.3)
+    y_speed = (math.sin(yaw)*forward_speed - math.cos(yaw)*lateral_speed)*(0.3)
+    z_speed = vertical_speed
 
     # Set linear velocity for forward motion (in the body frame)
     cmd_vel.twist.linear.x = x_speed
@@ -638,10 +646,13 @@ def send_velocity_command(forward_speed, lateral_speed, correction_yaw_rate):
     # Set linear velocity for lateral motion (in the body frame)
     cmd_vel.twist.linear.y = y_speed
 
+    # Set linear velocity for vertical motion (in the body frame)
+    cmd_vel.twist.linear.z = z_speed
+
     # Set linear velocity for lateral motion (in the body frame)
     cmd_vel.twist.angular.z = correction_yaw_rate
     
-    if print_stat_test: print(f'Command Velocity: x_speed: {x_speed} | y_speed: {y_speed} | z_angular: {correction_yaw_rate}')
+    if print_stat: print(f'Command Velocity: x_speed: {x_speed} | y_speed: {y_speed} | z_angular: {correction_yaw_rate}')
     # Publish the TwistStamped message
     twist_stamped_pub.publish(cmd_vel)
 
@@ -670,6 +681,7 @@ def dofeedbackcontrol():
     global setpoint_global_pub
     global horizontalerror_keypoint, verticalerror_keypoint
     global yaw_pub, twist_stamped_pub
+    global sampling_time_info_pub
 
     publish_rate = time.time()
 
@@ -695,6 +707,7 @@ def dofeedbackcontrol():
     # ---------------------------------------------- New ---------------------------------------------- #
     #yaw_pub = rospy.Publisher('/mavros/setpoint_position/local', PoseStamped, queue_size=1)
     twist_stamped_pub = rospy.Publisher('/mavros/setpoint_velocity/cmd_vel', TwistStamped, queue_size=1)
+    sampling_time_info_pub = rospy.Publisher('sampling_time_info_topic', Float64, queue_size=10)
     global start_time_track, source_gps_track
     start_time_track, source_gps_track = True, True
     # ---------------------------------------------- New ---------------------------------------------- #
@@ -707,7 +720,7 @@ def dofeedbackcontrol():
     rcmsg = OverrideRCIn()
     rcmsg.channels = np.zeros(18,dtype=np.uint16).tolist()
 
-    rate = rospy.Rate(10) # originally 10hz
+    rate = rospy.Rate(20) # originally 10hz
 
     '''
     while not rospy.is_shutdown():
@@ -919,8 +932,7 @@ def dofeedbackcontrol():
             above_object = False
             if print_flags: print('forward_scan = False | above_object = False')
             if track_sampling_time: sampling_t0 = time.time()
-            # sample_heading_test(-fspeed_head,-hspeed_head)
-            if print_stat_test: print(f'fspeed_head: {-fspeed_head}, hspeed_head: {hspeed_head}')
+            if print_stat: print(f'fspeed_head: {-fspeed_head}, hspeed_head: {hspeed_head}')
             sample_heading_test2(-fspeed_head,-hspeed_head)
 
 
@@ -1230,13 +1242,20 @@ def sample_heading_test2(fspeed_flow, hspeed_flow):
     global slope_deg, head
     global EXECUTION
     global start_time_track, source_gps_track
+    global yawing_using_kalman_filter
+    global sampling_time_info_pub, proportional_gain
 
     sampling = True
     if print_flags: print('sampling = True')
+    if int(time.time()-sampling_t0) % 3 ==0:
+        proportional_gain = proportional_gain + 0.03
+    print(f'Proportional Gain Reduced to: {proportional_gain}', end='\r')
     # reverse_kalman = False
 
     # yawrate = head - slope_deg
     # moving away from the source of the smoke
+
+    sampling_time_info_pub.publish(time.time()-sampling_t0)
 
     if time.time()-sampling_t0 < 3:
         for_speed = fspeed_flow 
@@ -1247,37 +1266,22 @@ def sample_heading_test2(fspeed_flow, hspeed_flow):
         z_angular = yaw_correction*(-0.01)
         track_sampling_time = False
         if print_flags: print('track_sampling_time = False')
-        if print_stat_test: print(f'First 3 seconds: fspeed: {for_speed} | hspeed: {hor_speed} | z_angular: {z_angular}')
-        '''
-        elif time.time()-sampling_t0 >= 3 and time.time()-sampling_t0 < 3.25:
-            
-            # if source_gps_track:
-            #     source_gps[0], source_gps[1], source_gps[2] = gps_lat, gps_long, gps_alt
-            #     source_gps_track = False
-            #     print(f'source gps: {source_gps} and source_gps_track = False')
-        
-            fspeed, hspeed, vspeed = 0.25, 0, 0
-            #yaw_correction = heading_btw_points()
-            #z_angular = yaw_correction*(-0.07)
-            z_angular = 0
-            track_sampling_time = False
-            if print_flags: print('track_sampling_time = False')
-            if print_stat_test: print(f'Coming out of source: fspeed: {fspeed} | hspeed: {hspeed} | z_angular: {z_angular}')
-        '''
-    elif (time_lastbox_smoketrack != None and (rospy.Time.now() - time_lastbox_smoketrack < rospy.Duration(7.5))):
+        if print_stat: print(f'First 3 seconds: fspeed: {for_speed} | hspeed: {hor_speed} | z_angular: {z_angular}')
+    elif (time_lastbox_smoketrack != None and (rospy.Time.now() - time_lastbox_smoketrack < rospy.Duration(8.5))):
         yaw_correction = heading_btw_points()
-        for_speed = fspeed_flow * 0.2
-        hor_speed = - horizontalerror_smoketrack*13 # (hspeed_flow)*0.5 # - horizontalerror_smoketrack * (10)) # previously 15 working
-        ver_speed = verticalerror_smoketrack * (10)
+        for_speed = fspeed_flow*0.85
+        hor_speed = - horizontalerror_smoketrack*proportional_gain # 12 # (hspeed_flow)*0.5 # - horizontalerror_smoketrack * (10)) # previously 15 working
+        if yawing_using_kalman_filter: ver_speed = 0
+        else: ver_speed = 0 # verticalerror_smoketrack * (3)
         z_angular = yaw_correction*(-0.075) # previously -0.05 working
-        if print_stat_test: print(f"Sampling using Segment or Kalman: fspeed: {for_speed} | hspeed: {hor_speed} with hor_error: {horizontalerror_smoketrack} | z_angular: {z_angular}")
+        if print_stat: print(f"Sampling using Segment or Kalman: fspeed: {for_speed} | hspeed: {hor_speed} with hor_error: {horizontalerror_smoketrack} | z_angular: {z_angular}")
     else:
         yaw_correction = heading_btw_points()
-        for_speed = 0
-        hor_speed = - (kf.x[0, 0]) * (10) # hspeed_flow - (kf.x[0, 0]) * (20)
+        for_speed = fspeed_flow*0.3
+        hor_speed = - (kf.x[0, 0]) * (proportional_gain) # hspeed_flow - (kf.x[0, 0]) * (20)
         ver_speed = 0
         z_angular = yaw_correction*(-0.075) # previously -0.05 working
-        if print_stat_test: print(f"Sampling ... using R. Kalman: fspeed: {for_speed} | hspeed: {hor_speed} | z_angular: {z_angular}")
+        if print_stat: print(f"Sampling ... using R. Kalman: fspeed: {for_speed} | hspeed: {hor_speed} | z_angular: {z_angular}")
 
     
     if time.time()-sampling_t0 < sampling_time:
@@ -1285,7 +1289,7 @@ def sample_heading_test2(fspeed_flow, hspeed_flow):
         if print_flags: print('track_sampling_time = False')
         #twistpub.publish(twistmsg)
         yaw_correction = heading_btw_points()
-        send_velocity_command(forward_speed=for_speed, lateral_speed=hor_speed, correction_yaw_rate=z_angular)
+        send_velocity_command(forward_speed=for_speed, lateral_speed=hor_speed, vertical_speed=ver_speed, correction_yaw_rate=z_angular)
     elif time.time()-sampling_t0 >= sampling_time:
         track_sampling_time = True
         sample_along_heading = False
@@ -1315,6 +1319,7 @@ def save_log():
 if __name__ == '__main__':
     print("Initializing feedback node...")
     rospy.init_node('feedbackcontrol_node', anonymous=False)
+    #rospy.init_node('sampling_time_info_pub', anonymous=True)
     twist_pub = rospy.Publisher('/mavros/setpoint_position/local', PoseStamped, queue_size=1)
     
     #global EXECUTION

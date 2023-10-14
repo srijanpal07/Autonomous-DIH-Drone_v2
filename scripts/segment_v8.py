@@ -8,7 +8,7 @@ from rospy.client import init_node
 from sensor_msgs.msg import Image
 from vision_msgs.msg import Detection2D
 from sensor_msgs.msg import TimeReference
-from std_msgs.msg import String
+from std_msgs.msg import Float64, String
 import numpy as np
 import cv2
 import os, re
@@ -33,7 +33,9 @@ global imgsz, model, device, names, max_det, max_delay
 #global engine, half
 
 global threshold
-threshold = 220 # white smoke
+threshold = 240 # Initializing Threshold to detect the densest part of the white smoke
+global sampling_time_passed
+sampling_time_passed = 0 
 
 #------------------------OPTIONS---------------------#
 max_delay = 0.5 # [seconds] delay between last detection and current image after which to just drop images to catch up
@@ -95,6 +97,20 @@ font_thickness = 2
 
 
 
+
+def time_info_callback(data):
+    global threshold, sampling_time_passed
+
+    #rospy.loginfo(f"Received timestamp: {data.data} seconds") 
+    if int(data.data) - sampling_time_passed > 1:
+        sampling_time_passed = sampling_time_passed + 1
+        if sampling_time_passed % 2 == 0:
+            threshold = threshold - 1
+    print(f"Received timestamp: {sampling_time_passed} secs ------- threshold reduced to : threshold: {threshold}", end='\r')
+
+
+
+
 def imagecallback(img):
     global pub,box,video,timelog
     global imgsz, model, device, names
@@ -118,14 +134,6 @@ def imagecallback(img):
             max_white_pixels, data_idx = 0, 0
             x_mean, y_mean = -1, -1
             for i in range(len(results[0].masks.data)):
-                '''
-                results = ops.non_max_suppression(results[0].boxes.data, 
-                                              conf_thres=conf_thres, 
-                                              iou_thres=iou_thres, 
-                                              classes=None, 
-                                              agnostic=False, 
-                                              max_det=max_det)
-                '''
                 #results = non_max_suppression(results[0].masks.data[0], conf_thres=conf_thres, iou_thres=iou_thres, classes=None, agnostic=False, max_det=max_det, max_wh=1000)
 
                 indices = find_element_indices(results[0].masks.data[0].cpu().numpy(), 1) # a pixel belonging to a segmented class is having a value of 1, rest 0
@@ -162,7 +170,7 @@ def imagecallback(img):
 
                 if VIEW_MASK:
                     img_mask = cv2.circle(img_mask, (y_mean, x_mean), 5, (0, 0, 255), -1)
-                    cv2.imshow('Mask', img_mask)
+                    cv2.imshow('Smoke Mask', img_mask)
                     cv2.waitKey(1)
         
                 annotated_frame = results[0].plot() # result is a <class 'list'> in which the first element is<class 'ultralytics.engine.results.Results'>
@@ -172,10 +180,21 @@ def imagecallback(img):
                 annotated_frame = cv2.circle(annotated_frame, (y_mean, x_mean), 10, (255, 0, 0), -1)
                 
                 if VIEW_IMG:
-                    wind_h, wind_w = 960, 540
-                    cv2.namedWindow('Segmentation V8', cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
-                    cv2.resizeWindow('Segmentation V8', wind_h, wind_w)
-                    cv2.imshow('Segmentation V8', annotated_frame)
+                    annotated_frame = results[0].plot() # result is a <class 'list'> in which the first element is<class 'ultralytics.engine.results.Results'>
+                    # centroid of smoke normalized to the size of the original image
+                    x_mean = int(x_mean_norm * annotated_frame.shape[0])
+                    y_mean = int(y_mean_norm * annotated_frame.shape[1])
+                    annotated_frame = cv2.circle(annotated_frame, (y_mean, x_mean), 20, (255, 0, 0), -1)
+
+                    #wind_h, wind_w = 960, 540 # (192,224)
+                    scale_percent = 25 # percent of original size
+                    width = int(annotated_frame.shape[1] * scale_percent / 100)
+                    height = int(annotated_frame.shape[0] * scale_percent / 100)
+                    dim = (width, height)
+                    annotated_frame_resize = cv2.resize(annotated_frame, dim, interpolation = cv2.INTER_AREA)
+                    # cv2.namedWindow('Smoke Segmentation', cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
+                    # cv2.resizeWindow('Smoke Segmentation', wind_h, wind_w)
+                    cv2.imshow('Smoke Segmentation', annotated_frame_resize)
                     cv2.waitKey(1)
 
                 box.header.seq = img.header.seq
@@ -189,7 +208,7 @@ def imagecallback(img):
                 box.bbox.size_x = white_pixel_count
                 pub.publish(box)
                 
-                print(f'No fo white pixels: {white_pixel_count}', end='\r')
+                #print(f'No fo white pixels: {white_pixel_count}', end='\r')
                 text_to_image = 'processed'
                 img_numpy = cv2.putText(img_numpy,text_to_image,(10,30),font, font_size, font_color, font_thickness, cv2.LINE_AA)
 
@@ -217,13 +236,13 @@ def imagecallback(img):
 
         if SAVE_IMG:
             if save_format=='.raw':
-                fid = open(savedir.joinpath('Detection-%06.0f.raw' % savenum),'wb')
+                fid = open(savedir.joinpath('Segmentation-%06.0f.raw' % savenum),'wb')
                 fid.write(img_numpy.flatten())
                 fid.close()
             elif save_format == '.avi':
                 video.write(img_numpy)
             else:
-                cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum),img_numpy))
+                cv2.imwrite(str(savedir.joinpath('Segmentation-%06.0f.jpg' % savenum),img_numpy))
         
         
 
@@ -235,7 +254,7 @@ def init_detection_node():
     global imgsz, model, device
     
     print('Initializing YOLOv8 segmentation model')
-    model= YOLO(YOLOv5_ROOT / 'yolov8s-best.pt') # model= YOLO(YOLOv5_ROOT / 'yolov8-best.pt')
+    model= YOLO(YOLOv5_ROOT / 'yolov8-best.pt') # model= YOLO(YOLOv5_ROOT / 'yolov8-best.pt')
 
     # initializing video file
     if save_format=='.avi':
@@ -252,6 +271,7 @@ def init_detection_node():
     # initializing node
     rospy.init_node('segmentation_node', anonymous=False)
     rospy.Subscriber('front_centre_cam', Image, imagecallback)
+    rospy.Subscriber('sampling_time_info_topic', Float64, time_info_callback)
     
     rospy.spin()
 
@@ -302,8 +322,14 @@ def check_white_pixels(mask_indices, img):
 
     #print(f'Len of mask_indices: {len(mask_indices)}, Len of white_pixel_indices: {len(white_pixel_indices)}', end='\r')
     if VIEW_IMG:
-        img = cv2.circle(img, (y_mean, x_mean), 3, (255, 0, 0), -1)
-        cv2.imshow('Processed Image', img)
+        img = cv2.circle(img, (y_mean, x_mean), 2, (255, 0, 0), -1)
+        width = int(img.shape[1]*2)
+        height = int(img.shape[0]*2)
+        dim = (width, height)
+
+        # resize image
+        img_resize = cv2.resize(img, dim, interpolation = cv2.INTER_AREA)
+        cv2.imshow('Thresholding Segmentation', img_resize)
         cv2.waitKey(1)
 
     if len(white_pixel_indices) != 0:
