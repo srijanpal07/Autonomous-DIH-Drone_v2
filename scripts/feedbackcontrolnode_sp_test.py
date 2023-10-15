@@ -23,7 +23,7 @@ from filterpy.kalman import KalmanFilter
 from geopy.distance import geodesic
 
 # global EXECUTION
-EXECUTION = 'SIMULATION' # 'SIMULATION' or 'DEPLOYMENT'
+EXECUTION = 'DEPLOYMENT' # 'SIMULATION' or 'DEPLOYMENT'
 
 if EXECUTION == 'SIMULATION':
     import airsim
