@@ -23,7 +23,7 @@ from filterpy.kalman import KalmanFilter
 from geopy.distance import geodesic
 
 # global EXECUTION
-EXECUTION = 'DEPLOYMENT' # 'SIMULATION' or 'DEPLOYMENT'
+EXECUTION = 'SIMULATION' # 'SIMULATION' or 'DEPLOYMENT'
 
 if EXECUTION == 'SIMULATION':
     import airsim
@@ -46,7 +46,7 @@ head, slope_deg = 0.0, 0.0
 source_gps = [0.0, 0.0, 0.0] # lattitude, longitude and altitude
 drone_gps = [0.0, 0.0, 0.0] # lattitude, longitude and altitude
 yawing_using_kalman_filter = False
-proportional_gain = 12
+proportional_gain = 8
 
 
 
@@ -1247,8 +1247,8 @@ def sample_heading_test2(fspeed_flow, hspeed_flow):
 
     sampling = True
     if print_flags: print('sampling = True')
-    if int(time.time()-sampling_t0) % 3 ==0:
-        proportional_gain = proportional_gain + 0.03
+    if (time.time()-sampling_t0) % 3 < 1:
+        proportional_gain = proportional_gain + 0.07
     print(f'Proportional Gain Reduced to: {proportional_gain}', end='\r')
     # reverse_kalman = False
 
@@ -1257,7 +1257,7 @@ def sample_heading_test2(fspeed_flow, hspeed_flow):
 
     sampling_time_info_pub.publish(time.time()-sampling_t0)
 
-    if time.time()-sampling_t0 < 3:
+    if time.time()-sampling_t0 < 1.5:
         for_speed = fspeed_flow 
         hor_speed = 0 # hspeed_flow * 0.01 #(hspeed_flow - horizontalerror_smoketrack * (20)) * 0.1 # previously 15 working
         ver_speed = 0
@@ -1266,13 +1266,13 @@ def sample_heading_test2(fspeed_flow, hspeed_flow):
         z_angular = yaw_correction*(-0.01)
         track_sampling_time = False
         if print_flags: print('track_sampling_time = False')
-        if print_stat: print(f'First 3 seconds: fspeed: {for_speed} | hspeed: {hor_speed} | z_angular: {z_angular}')
+        if print_stat: print(f'First 1.5 seconds: fspeed: {for_speed} | hspeed: {hor_speed} | z_angular: {z_angular}')
     elif (time_lastbox_smoketrack != None and (rospy.Time.now() - time_lastbox_smoketrack < rospy.Duration(8.5))):
         yaw_correction = heading_btw_points()
         for_speed = fspeed_flow*0.85
         hor_speed = - horizontalerror_smoketrack*proportional_gain # 12 # (hspeed_flow)*0.5 # - horizontalerror_smoketrack * (10)) # previously 15 working
         if yawing_using_kalman_filter: ver_speed = 0
-        else: ver_speed = 0 # verticalerror_smoketrack * (3)
+        else: ver_speed = verticalerror_smoketrack * (5)
         z_angular = yaw_correction*(-0.075) # previously -0.05 working
         if print_stat: print(f"Sampling using Segment or Kalman: fspeed: {for_speed} | hspeed: {hor_speed} with hor_error: {horizontalerror_smoketrack} | z_angular: {z_angular}")
     else:
