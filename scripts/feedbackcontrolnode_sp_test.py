@@ -24,34 +24,13 @@ from geopy.distance import geodesic
 
 # global EXECUTION
 EXECUTION = 'SIMULATION' # 'SIMULATION' or 'DEPLOYMENT'
-
 if EXECUTION == 'SIMULATION':
     import airsim
     from airsim_ros_pkgs.msg import GimbalAngleEulerCmd, GPSYaw
 
 
-global horizontalerror, verticalerror, sizeerror
-global horizontalerror_smoketrack, verticalerror_smoketrack, sizeerror_smoketrack
-global horizontalerror_keypoint, verticalerror_keypoint
-global horizontalerror_smoketrack_list
-global head, slope_deg
-global source_gps, drone_gps
-global setpoint_global_pub
-global yawing_using_kalman_filter
-global proportional_gain
 
-horizontalerror_smoketrack_list =[]
-time_lastbox, time_lastbox_smoketrack = None, None
-head, slope_deg = 0.0, 0.0
-source_gps = [0.0, 0.0, 0.0] # lattitude, longitude and altitude
-drone_gps = [0.0, 0.0, 0.0] # lattitude, longitude and altitude
-yawing_using_kalman_filter = False
-proportional_gain = 8
-
-
-
-
-#------------OPTIONS FOR MODES-------#
+#----------------------- OPTIONS FOR MODES (Nate) -----------------------#
 OPT_FLOW_MASTER = True # true means optical flow is used
 top_down_mode = False  # different operating mode for motion if the drone is far above the feature
 hybrid_mode = True # starts horizontal, moves toward object, then once above it, moves into the top-down-mode
@@ -60,35 +39,40 @@ USE_PITCH_ERROR = False # Previuosly True
 forward_scan_option = True # Previously False changes to True this is primarily for smoke generator and grenade experiments, otherwise hybrid mode should work well over a more static plume
 fixed_heading_option = True # this mode tells the drone to sit above the smoke for a solid 5 seconds in order to get a heading from the mean flow direction, and then it goes to a fixed height and moves in that direction
 controlled_descent_option = True
-
-debugging = False
-if debugging:
-    print('########### DEBUGGING MODE #############')
-#---------------------------------------------------#
+#----------------------- OPTIONS FOR MODES (Nate) -----------------------# 
 
 
+
+# ---------------------------- Creating a saving directory ---------------------------- #
 # create saving directory
-# username = os.getlogin( )
 tmp = datetime.datetime.now()
-stamp = ("%02d-%02d-%02d" % 
-    (tmp.year, tmp.month, tmp.day))
-# maindir = Path('/home/%s/1FeedbackControl' % username)
-maindir = Path('./SavedData')
+stamp = ("%02d-%02d-%02d" %(tmp.year, tmp.month, tmp.day))
+
+if EXECUTION == 'SIMULATION':
+    maindir = Path('./SavedData')
+elif EXECUTION == 'DEPLOYMENT':
+    username = os.getlogin()
+    maindir = Path('/home/%s/1FeedbackControl' % username)
+
 runs_today = list(maindir.glob('*%s*_fc-data' % stamp))
 if runs_today:
     runs_today = [str(name) for name in runs_today]
-    regex = 'run\d\d'
+    regex = 'run\\d\\d'
     runs_today=re.findall(regex,''.join(runs_today))
     runs_today = np.array([int(name[-2:]) for name in runs_today])
     new_run_num = max(runs_today)+1
 else:
     new_run_num = 1
+
 savedir = maindir.joinpath('%s_run%02d_fc-data' % (stamp,new_run_num))
 os.makedirs(savedir)  
 fid = open(savedir.joinpath('Feedbackdata.csv'),'w')
 fid.write('Timestamp_Jetson,Timestamp_GPS,GPS_x,GPS_y,GPS_z,GPS_lat,GPS_long,GPS_alt_rel,Surveying,Sampling,MoveUp,AboveObject,Pitch,Size_error,OptFlow_On,Flow_x,Flow_y,Vspeed,Fspeed,Hspeed\n')
+# ---------------------------- Creating a saving directory ---------------------------- #
 
 
+
+#----------------------- PRINT OPTIONS ----------------------------#
 print_pitch = False
 print_size_error = False
 print_mode = False
@@ -96,27 +80,58 @@ print_vspeed = False
 print_yawrate = False
 print_flow=False
 print_alt = False
-
-#-----------------------srijan----------------------------#
+#-----------------------(srijan)----------------------------#
 print_stat = False
 print_stat_test = True
 print_flags = False
 print_state = True
 print_speeds = False
+#----------------------- PRINT OPTIONS ----------------------------#
 
-sampling_time = 250 # previously 20, changed to 10 to cope up with smoke direction change
-smoke_dir = ''
-first_look_around = True
-sample_along_heading = False
+
+
+#----------------------- Global Parameters (srijan) ----------------------------#
 global sampling_t0
-sampling_t0 = None
 global track_sampling_time
-track_sampling_time = True
 global fspeed_head, hspeed_head
 global start_time_track, source_gps_track
-#------------------------srijan---------------------------#
+global horizontalerror, verticalerror, sizeerror
+global horizontalerror_smoketrack, verticalerror_smoketrack, sizeerror_smoketrack
+global horizontalerror_keypoint, verticalerror_keypoint
+global head, slope_deg
+global setpoint_global_pub
+global yawing_using_kalman_filter
+global proportional_gain
+#----------------------- Global Parameters (srijan) ----------------------------#
 
 
+
+#----------------------- Initialization (srijan) ----------------------------#
+smoke_dir = ''
+head, slope_deg = 0.0, 0.0
+global source_gps, drone_gps
+source_gps = [0.0, 0.0, 0.0] # lattitude, longitude and altitude
+drone_gps = [0.0, 0.0, 0.0] # lattitude, longitude and altitude
+global horizontalerror_smoketrack_list
+horizontalerror_smoketrack_list =[]
+time_lastbox, time_lastbox_smoketrack = None, None
+yawing_using_kalman_filter = False
+first_look_around = True
+sample_along_heading = False
+sampling_t0 = None
+track_sampling_time = True
+#----------------------- Initialization (srijan) ---------------------------- #
+
+
+
+# ---------------------- Simulation Parameters (srijan) ------------------------------ #
+sampling_time = 250
+proportional_gain = 8
+# ---------------------- Simulation Parameters (srijan) ------------------------------ #
+
+
+
+# ---------------------------------------------------- Deployment Parameters (Nate) ---------------------------------------------------- #
 # bounding box options
 setpoint_size = 0.9 #fraction of frame that should be filled by target. Largest axis (height or width) used.
 setpoint_size_approach = 1.5 # only relevant for hybrid mode, for getting close to target
@@ -129,7 +144,7 @@ alt_min = 1 # minimum allowable altitude
 # gain values
 size_gain = 1
 yaw_gain = 1
-gimbal_pitch_gain = -40 # previously -100, this needs to be adjusted depending on teh frame rate for detection (20fps=-50gain, while saving video; 30fps=-25gain with no saving)
+gimbal_pitch_gain = -40 # previously -100, this needs to be adjusted depending on the frame rate for detection (20fps=-50gain, while saving video; 30fps=-25gain with no saving)
 gimbal_yaw_gain = 12 # previously 30, adjusting now for faster yolo
 
 traverse_gain = 2.5
@@ -141,7 +156,7 @@ flow_survey_gain = 60 # gain per meter of altitude
 vertical_gain = 2 # half of the size_gain value
 # new gain for error term for pitch
 pitcherror_gain_min = 0.75 # sets a floor on how much teh drone can be slowed down by pitch feedback
-                           # larger value (max 1) means the forward speed will be attenuated less (i.e., not as slowed down by teh pitch feedback) 
+                           # larger value (max 1) means the forward speed will be attenuated less (i.e., not as slowed down by teh pitch feedback)
 # limit parameters
 yaw_center = 1500 # 1500 is straight ahead
 # 1000 is straight ahead
@@ -194,10 +209,11 @@ yawcommand = yaw_center
 #ADDED for airsim
 airsim_yaw = 0
 publish_rate = 0
+# ---------------------------------------------------- Deployment Parameters (Nate) ---------------------------------------------------- #
 
 
 
-# --------------------- Kalman Filter Initialization --------------------- #
+# --------------------- Kalman Filter Initialization (srijan) --------------------- #
 # Create a Kalman filter for yaw angle prediction
 global kf, previous_yaw_measurements
 previous_yaw_measurements = []
@@ -224,111 +240,114 @@ kf.x = np.array([[initial_yaw],
                 [initial_yaw_rate]])  # Initial state estimate
 kf.P *= 100.0  # Initial covariance matrix
 
-# --------------------- Kalman Filter Initialization --------------------- #
+# --------------------- Kalman Filter Initialization (srijan) --------------------- #
 
 
 
 def moveAirsimGimbal(pitchcommand, yawcommand):
-        '''
-        Converts gimbal's pwm commands to angles for running is simulation
-        pitchcommand - Pitch PWM. 1000 is straight ahead (0 deg) and 1900 is straight down (-90 deg) 
-        yawcommand - Yaw PWM. 1000 is -45 deg and 2000 is 45 deg
+    """
+    Converts gimbal's pwm commands to angles for running is simulation
+    pitchcommand - Pitch PWM. 1000 is straight ahead (0 deg) and 1900 is straight down (-90 deg) 
+    yawcommand - Yaw PWM. 1000 is -45 deg and 2000 is 45 deg
+    """
+    global gimbal, airsim_yaw, yaw
+    if print_stat: print(f'-------------------Inside moveAirsimGimbal()-------------------\n',
+                         f'pithchcommand: {pitchcommand}, yawcommand: {yawcommand}')
 
-        '''
-
-        global gimbal, airsim_yaw, yaw
-
-        if print_stat: print(f'-------------------Inside moveAirsimGimbal()-------------------\npithchcommand: {pitchcommand}, yawcommand: {yawcommand}')
-        
-        airsim_yaw = math.degrees(yaw)
-        if airsim_yaw<0:
-            airsim_yaw += 360
-        gimbal_pitch = (1000 - pitchcommand) / 10  
-        gimbal_yaw = ((yaw_center - yawcommand) * 45) / 500
-        cmd = GimbalAngleEulerCmd()
-        cmd.camera_name = "front_center"
-        cmd.vehicle_name = "PX4"
-        cmd.pitch = gimbal_pitch
-        cmd.yaw = gimbal_yaw - airsim_yaw + 90
-        if cmd.yaw>=360:
-            cmd.yaw = cmd.yaw % 360
-        
-        gimbal.publish(cmd)
+    airsim_yaw = math.degrees(yaw)
+    if airsim_yaw<0:
+        airsim_yaw += 360
+    gimbal_pitch = (1000 - pitchcommand) / 10  
+    gimbal_yaw = ((yaw_center - yawcommand) * 45) / 500
+    cmd = GimbalAngleEulerCmd()
+    cmd.camera_name = "front_center"
+    cmd.vehicle_name = "PX4"
+    cmd.pitch = gimbal_pitch
+    cmd.yaw = gimbal_yaw - airsim_yaw + 90
+    if cmd.yaw>=360:
+        cmd.yaw = cmd.yaw % 360
+    gimbal.publish(cmd)
 
 
 
 def offboard():
-        """
-        Used in Simulation to set 'OFFBOARD' mode so that it uses mavros commands for navigation
-        """
-        mode = SetModeRequest()
-        mode.base_mode = 0
-        mode.custom_mode = "OFFBOARD"
-        print("Setting up...", end ="->")
-        setm = rospy.ServiceProxy('/mavros/set_mode', SetMode)
-        resp = setm(mode)
-        print(resp)
-    
+    """
+    Used in Simulation to set 'OFFBOARD' mode 
+    so that it uses mavros commands for navigation
+    """
+    mode = SetModeRequest()
+    mode.base_mode = 0
+    mode.custom_mode = "OFFBOARD"
+    print("Setting up...", end ="->")
+    setm = rospy.ServiceProxy('/mavros/set_mode', SetMode)
+    resp = setm(mode)
+    print(resp)
+
 
 
 def euler_from_quaternion(x, y, z, w):
-        """
-        Convert a quaternion into euler angles (roll, pitch, yaw)
-        roll is rotation around x in radians (counterclockwise)
-        pitch is rotation around y in radians (counterclockwise)
-        yaw is rotation around z in radians (counterclockwise)
-        """
-        t0 = +2.0 * (w * x + y * z)
-        t1 = +1.0 - 2.0 * (x * x + y * y)
-        roll_x = math.atan2(t0, t1)
-        
-        t2 = +2.0 * (w * y - z * x)
-        t2 = +1.0 if t2 > +1.0 else t2
-        t2 = -1.0 if t2 < -1.0 else t2
-        pitch_y = math.asin(t2)
-        
-        t3 = +2.0 * (w * z + x * y)
-        t4 = +1.0 - 2.0 * (y * y + z * z)
-        yaw_z = math.atan2(t3, t4)
-        
-        return roll_x, pitch_y, yaw_z # in radians
+    """
+    Convert a quaternion into euler angles (roll, pitch, yaw)
+    roll is rotation around x in radians (counterclockwise)
+    pitch is rotation around y in radians (counterclockwise)
+    yaw is rotation around z in radians (counterclockwise)
+    """
+    t0 = +2.0 * (w * x + y * z)
+    t1 = +1.0 - 2.0 * (x * x + y * y)
+    roll_x = math.atan2(t0, t1)
+    t2 = +2.0 * (w * y - z * x)
+    t2 = +1.0 if t2 > +1.0 else t2
+    t2 = -1.0 if t2 < -1.0 else t2
+    pitch_y = math.asin(t2)
+    t3 = +2.0 * (w * z + x * y)
+    t4 = +1.0 - 2.0 * (y * y + z * z)
+    yaw_z = math.atan2(t3, t4)
+    return roll_x, pitch_y, yaw_z # in radians
 
 
 
 def euler_to_quaternion(roll, pitch, yaw):
-        # Convert Euler angles to quaternion
-        cy = math.cos(yaw * 0.5)
-        sy = math.sin(yaw * 0.5)
-        cp = math.cos(pitch * 0.5)
-        sp = math.sin(pitch * 0.5)
-        cr = math.cos(roll * 0.5)
-        sr = math.sin(roll * 0.5)
+    """
+    Convert Euler angles to quaternion and 
+    calculate quaternion components w, x, y, z
+    """
+    # Convert Euler angles to quaternion
+    cy = math.cos(yaw * 0.5)
+    sy = math.sin(yaw * 0.5)
+    cp = math.cos(pitch * 0.5)
+    sp = math.sin(pitch * 0.5)
+    cr = math.cos(roll * 0.5)
+    sr = math.sin(roll * 0.5)
 
-        # Calculate quaternion components
-        w = cy * cp * cr + sy * sp * sr
-        x = cy * cp * sr - sy * sp * cr
-        y = sy * cp * sr + cy * sp * cr
-        z = sy * cp * cr - cy * sp * sr
+    # Calculate quaternion components
+    w = cy * cp * cr + sy * sp * sr
+    x = cy * cp * sr - sy * sp * cr
+    y = sy * cp * sr + cy * sp * cr
+    z = sy * cp * cr - cy * sp * sr
 
-        return x, y, z, w
+    return x, y, z, w
 
 
 
 def pose_callback(pose):
-        global yaw,alt, gps_x, gps_y
-        q = pose.pose.orientation
-        # yaw = atan2(2.0*(q.y*q.z + q.w*q.x), q.w*q.w - q.x*q.x - q.y*q.y + q.z*q.z)
-        r,p,y = euler_from_quaternion(q.x,q.y,q.z,q.w)
-        yaw = y
-        alt = pose.pose.position.z
-        gps_x = pose.pose.position.x
-        gps_y = pose.pose.position.y
-        if print_stat: print(f"----------------Inside pose_callback():----------------\nalt: {alt}, gps_x:{gps_x}, gps_y:{gps_y}")
-        if print_stat: print(f'yaw: {yaw}, alt: {alt}, gps_x:{gps_x}, gps_y:{gps_y}')
+    global yaw, alt, gps_x, gps_y
+    q = pose.pose.orientation
+    # yaw = atan2(2.0*(q.y*q.z + q.w*q.x), q.w*q.w - q.x*q.x - q.y*q.y + q.z*q.z)
+    r,p,y = euler_from_quaternion(q.x,q.y,q.z,q.w)
+    yaw = y
+    alt = pose.pose.position.z
+    gps_x = pose.pose.position.x
+    gps_y = pose.pose.position.y
+    if print_stat: print(f'----------------Inside pose_callback():----------------\n',
+                         f'alt: {alt}, gps_x:{gps_x}, gps_y:{gps_y}')
+    if print_stat: print(f'yaw: {yaw}, alt: {alt}, gps_x:{gps_x}, gps_y:{gps_y}')
 
 
 
 def compass_hdg_callback(heading):
+    """
+    Returns drone's heading with respect to North
+    """
     global head
     head = heading.data
 
@@ -340,15 +359,20 @@ def heading_btw_points():
     https://mapscaping.com/how-to-calculate-bearing-between-two-coordinates/
     """
     global head, source_gps, drone_gps
-
     drone_heading = head
+
     # Format: point = (latitude_point, longitude_point)
     point_A = (math.radians(source_gps[0]), math.radians(source_gps[1]))
     point_B = (math.radians(drone_gps[0]), math.radians(drone_gps[1]))
+    sin, cos = math.sin, math.cos
 
-    # Formula :
-    # bearing  = math.atan2(math.sin(long2      - long1)      * math.cos(lat2)      , math.cos(lat1)       * math.sin(lat2)       - math.sin(lat1)       * math.cos(lat2)       * math.cos(long2      - long1))
-    bearing_AB = math.atan2(math.sin(point_B[1] - point_A[1]) * math.cos(point_B[0]), math.cos(point_A[0]) * math.sin(point_B[0]) - math.sin(point_A[0]) * math.cos(point_B[0]) * math.cos(point_B[1] - point_A[1]))
+    # Formula : bearing  = math.atan2(math.sin(long2 - long1) * math.cos(lat2),
+    #                                   math.cos(lat1) * math.sin(lat2) - math.sin(lat1) *
+    #                                   math.cos(lat2) * math.cos(long2 - long1))
+    bearing_AB = math.atan2(sin(point_B[1] - point_A[1]) * cos(point_B[0]),
+                            cos(point_A[0]) * sin(point_B[0]) - sin(point_A[0]) *
+                            cos(point_B[0]) * cos(point_B[1] - point_A[1]))
+    
     heading_AB = math.degrees(bearing_AB)
     heading_AB = (heading_AB + 360) % 360
     diff_head = heading_AB - drone_heading
@@ -361,8 +385,12 @@ def heading_btw_points():
         diff_head = diff_head
 
     yaw_correction = diff_head
-    if print_stat: print(f'heading btw source [{point_A[0]:.8f}, {point_A[1]:.8f}] & drone[{point_B[0]:.8f}, {point_B[1]:.8f}] : {heading_AB:.4f} deg | drone heading: {head} | Diff in heading: {diff_head:.2f}')
- 
+    if print_stat:
+        print(f'heading btw source [{point_A[0]:.8f}',
+              f'{point_A[1]:.8f}] & drone[{point_B[0]:.8f}',
+              f'{point_B[1]:.8f}] : {heading_AB:.4f} deg |',
+              f'drone heading: {head} | Diff in heading: {diff_head:.2f}')
+
     return yaw_correction
 
 
@@ -373,7 +401,8 @@ def state_callback(state):
     """
     global guided_mode
     global print_state
-    if print_stat: print(f"----------------Inside state_callback():----------------\nstate.mode={state.mode}")
+    if print_stat: print(f'----------------Inside state_callback():----------------\n',
+                         f'state.mode={state.mode}')
     if state.mode == 'OFFBOARD':
         guided_mode = True
         if print_stat: print('OFFBOARD')
@@ -388,10 +417,13 @@ def state_callback(state):
 
 
 def time_callback(gpstime):
-        global gps_t
-        gps_t = float(gpstime.time_ref.to_sec())
-        # gps_t = gps_t
-        if print_stat: print(f"----------------Inside time_callback:----------------\nTime: {gps_t}")
+    """
+    returns the gps time
+    """
+    global gps_t
+    gps_t = float(gpstime.time_ref.to_sec())
+    # gps_t = gps_t
+    if print_stat: print(f"----------------Inside time_callback:----------------\nTime: {gps_t}")
 
 
 
@@ -416,39 +448,39 @@ def rel_alt_callback(altrel):
 
 
 def boundingbox_callback(box):
-        global horizontalerror, verticalerror, sizeerror
-        global time_lastbox, pitchcommand, yawcommand
-        global MOVE_ABOVE, OPT_FLOW
-        # positive errors give right, up
-        if box.bbox.center.x != -1:
-            if print_stat: print("----------------Inside boundingbox_callback():----------------\nBounding box found : box.bbox.center.x != -1")
-            time_lastbox = rospy.Time.now()
-            bboxsize = (box.bbox.size_x + box.bbox.size_y)/2 # take the average so that a very thin, long box will still be seen as small
-            
-            if not above_object: # different bbox size desired for approach and above stages for hybrid mode
-                if print_stat: print("Not above object ... ")
-                sizeerror = setpoint_size_approach - bboxsize # if box is smaller than setpoit, error is positive
-            else:
-                if print_stat: print("above_object was set to true previously")
-                sizeerror = setpoint_size - bboxsize # if box is smaller than setpoit, error is positive
-
-            if print_size_error: print('Setpoint - bbox (sizeerror) = %f' % sizeerror)
-
-            if not OPT_FLOW:
-                if print_stat: print("OPT_FLOW is set to False: Optical flow not running")   
-                horizontalerror = .5-box.bbox.center.x # if box center is on LHS of image, error is positive
-                verticalerror = .5-box.bbox.center.y # if box center is on upper half of image, error is positive 
-                if print_stat: 
-                    print(f'Horzontal error: {round(horizontalerror, 5)}, Vertical error: {round(verticalerror, 5)}')
-                    print(f"Changed pitchcommand,delta: {round(pitchcommand, 5)},{round(pitchdelta, 5)}  changed yawcommand, delta: {round(yawcommand, 5)},{round(yawdelta, 5)}")
-
-            if pitchcommand < pitch_thresh and bboxsize > 0.75: # if close and gimbal pitched upward, move to get above the object
-                MOVE_ABOVE = True
-                if print_stat: print('Gimbal pitched upward moving above to get above object ... : MOVE_ABOVE is set to True')
+    global horizontalerror, verticalerror, sizeerror
+    global time_lastbox, pitchcommand, yawcommand
+    global MOVE_ABOVE, OPT_FLOW
+    # positive errors give right, up
+    if box.bbox.center.x != -1:
+        if print_stat: print("----------------Inside boundingbox_callback():----------------\nBounding box found : box.bbox.center.x != -1")
+        time_lastbox = rospy.Time.now()
+        bboxsize = (box.bbox.size_x + box.bbox.size_y)/2 # take the average so that a very thin, long box will still be seen as small
+        
+        if not above_object: # different bbox size desired for approach and above stages for hybrid mode
+            if print_stat: print("Not above object ... ")
+            sizeerror = setpoint_size_approach - bboxsize # if box is smaller than setpoit, error is positive
         else:
-            if print_stat: print("----------------Inside boundingbox_callback():----------------\nBounding box not found : box.bbox.center.x = -1")
-    
-        return
+            if print_stat: print("above_object was set to true previously")
+            sizeerror = setpoint_size - bboxsize # if box is smaller than setpoit, error is positive
+
+        if print_size_error: print('Setpoint - bbox (sizeerror) = %f' % sizeerror)
+
+        if not OPT_FLOW:
+            if print_stat: print("OPT_FLOW is set to False: Optical flow not running")   
+            horizontalerror = .5-box.bbox.center.x # if box center is on LHS of image, error is positive
+            verticalerror = .5-box.bbox.center.y # if box center is on upper half of image, error is positive 
+            if print_stat: 
+                print(f'Horzontal error: {round(horizontalerror, 5)}, Vertical error: {round(verticalerror, 5)}')
+                print(f"Changed pitchcommand,delta: {round(pitchcommand, 5)},{round(pitchdelta, 5)}  changed yawcommand, delta: {round(yawcommand, 5)},{round(yawdelta, 5)}")
+
+        if pitchcommand < pitch_thresh and bboxsize > 0.75: # if close and gimbal pitched upward, move to get above the object
+            MOVE_ABOVE = True
+            if print_stat: print('Gimbal pitched upward moving above to get above object ... : MOVE_ABOVE is set to True')
+    else:
+        if print_stat: print("----------------Inside boundingbox_callback():----------------\nBounding box not found : box.bbox.center.x = -1")
+
+    return
 
 
 
@@ -503,104 +535,101 @@ def segmentation_callback(box):
 
 
 def keypoint_callback(box):
-        global horizontalerror_keypoint, verticalerror_keypoint
-        global time_lastbox_keypoint
-        global MOVE_ABOVE, OPT_FLOW
-        
-        # positive errors give right, up
-        if box.bbox.center.x != -1:
-            time_lastbox_keypoint = rospy.Time.now()  
-            horizontalerror_keypoint = 0.5-box.bbox.center.x # if smoke source keypoint is on LHS of image, error is positive
-            verticalerror_keypoint = 0.5-box.bbox.center.y # if smoke source keypoint is on upper half of image, error is positive 
-        else:
-            horizontalerror_keypoint = 0
-            verticalerror_keypoint = 0
-        return
+    global horizontalerror_keypoint, verticalerror_keypoint
+    global time_lastbox_keypoint
+    global MOVE_ABOVE, OPT_FLOW
+    
+    # positive errors give right, up
+    if box.bbox.center.x != -1:
+        time_lastbox_keypoint = rospy.Time.now()  
+        horizontalerror_keypoint = 0.5-box.bbox.center.x # if smoke source keypoint is on LHS of image, error is positive
+        verticalerror_keypoint = 0.5-box.bbox.center.y # if smoke source keypoint is on upper half of image, error is positive 
+    else:
+        horizontalerror_keypoint = 0
+        verticalerror_keypoint = 0
+    return
 
 
 
 def flow_callback(flow):
-        global horizontalerror, verticalerror,time_lastbox
-        global pitchcommand, yawcommand
-        global flow_x,flow_y,flow_t
-        global OPT_FLOW,OPT_COMPUTE_FLAG
+    global horizontalerror, verticalerror,time_lastbox
+    global pitchcommand, yawcommand
+    global flow_x,flow_y,flow_t
+    global OPT_FLOW,OPT_COMPUTE_FLAG
+    
+    # typical values might be around 10 pixels, depending on frame rate
+    flow_x = flow.size_x # movement to the right in the image is positive
+    flow_y = -flow.size_y # this is made negative so that positive flow_y means the object was moving toward the top of the image (RAFT returns negative y for this (i.e., toward smaller y coordinates))
+    # now movement to the top is positive flow_y
+    flow_t = float(gps_t)
+    # adjust the feedback error using the optical flow
+    if OPT_FLOW:
+        if print_stat: print('----------------Inside flow_callback():----------------\nDoing optical flow feedback ...')
+        OPT_COMPUTE_FLAG = True # this signals to later in the code that the first usable optical flow data can be pplied (instead of inheriting errors from bbox callback)
+        horizontalerror = -flow_x # to be consistent with the bounding box error
+        verticalerror = flow_y
+        if not above_object: # this should never end up being called normally, just for debugging optical flow in side-view
+            # pitch
+            pitchdelta = verticalerror * gimbal_pitch_gain
+            pitchdelta = min(max(pitchdelta,-limit_pitchchange),limit_pitchchange)
+            pitchcommand += pitchdelta
+            pitchcommand = min(max(pitchcommand,1000),2000)
+            yawdelta = horizontalerror * gimbal_yaw_gain
+            yawdelta = min(max(yawdelta,-limit_yawchange),limit_yawchange)
+            yawcommand += yawdelta
+            yawcommand = min(max(yawcommand,1000),2000)
+        if print_flow:
+            if print_stat: print('Flow x,y = %f,%f' % (flow_x,flow_y))
+            if print_stat: print(f'horizontal error: {horizontalerror}, verticalerror: {verticalerror}')
         
-        # typical values might be around 10 pixels, depending on frame rate
-        flow_x = flow.size_x # movement to the right in the image is positive
-        flow_y = -flow.size_y # this is made negative so that positive flow_y means the object was moving toward the top of the image (RAFT returns negative y for this (i.e., toward smaller y coordinates))
-        # now movement to the top is positive flow_y
-        flow_t = float(gps_t)
-        # adjust the feedback error using the optical flow
-        if OPT_FLOW:
-            if print_stat: print('----------------Inside flow_callback():----------------\nDoing optical flow feedback ...')
-            OPT_COMPUTE_FLAG = True # this signals to later in the code that the first usable optical flow data can be pplied (instead of inheriting errors from bbox callback)
-            horizontalerror = -flow_x # to be consistent with the bounding box error
-            verticalerror = flow_y
-            if not above_object: # this should never end up being called normally, just for debugging optical flow in side-view
-                # pitch
-                pitchdelta = verticalerror * gimbal_pitch_gain
-                pitchdelta = min(max(pitchdelta,-limit_pitchchange),limit_pitchchange)
-                pitchcommand += pitchdelta
-                pitchcommand = min(max(pitchcommand,1000),2000)
-                yawdelta = horizontalerror * gimbal_yaw_gain
-                yawdelta = min(max(yawdelta,-limit_yawchange),limit_yawchange)
-                yawcommand += yawdelta
-                yawcommand = min(max(yawcommand,1000),2000)
-            if print_flow:
-                if print_stat: print('Flow x,y = %f,%f' % (flow_x,flow_y))
-                if print_stat: print(f'horizontal error: {horizontalerror}, verticalerror: {verticalerror}')
-            
-            time_lastbox = rospy.Time.now()
-        else:
-            if print_stat: print("----------------Inside flow_callback():----------------\nOPT_FLOW was turned off: OPT_FLOW = False")
-        return
+        time_lastbox = rospy.Time.now()
+    else:
+        if print_stat: print("----------------Inside flow_callback():----------------\nOPT_FLOW was turned off: OPT_FLOW = False")
+    return
 
 
 
 def _build_global_setpoint2(latitude, longitude, altitude, yaw=0.0):
-        """
-        Builds a message for the /mavros/setpoint_position/global topic
-        """
-        geo_pose_setpoint = GeoPoseStamped()
-        geo_pose_setpoint.header.stamp = rospy.Time.now()
-        geo_pose_setpoint.pose.position.latitude = latitude
-        geo_pose_setpoint.pose.position.longitude = longitude
-        geo_pose_setpoint.pose.position.altitude = altitude
+    """
+    Builds a message for the /mavros/setpoint_position/global topic
+    """
+    geo_pose_setpoint = GeoPoseStamped()
+    geo_pose_setpoint.header.stamp = rospy.Time.now()
+    geo_pose_setpoint.pose.position.latitude = latitude
+    geo_pose_setpoint.pose.position.longitude = longitude
+    geo_pose_setpoint.pose.position.altitude = altitude
+    roll = 0.0
+    pitch = 0.0
+    q_x, q_y, q_z, q_w= euler_to_quaternion(roll, pitch, yaw)
+    geo_pose_setpoint.pose.orientation.x = q_x
+    geo_pose_setpoint.pose.orientation.y = q_y
+    geo_pose_setpoint.pose.orientation.z = q_z
+    geo_pose_setpoint.pose.orientation.w = q_w
 
-        
-        roll = 0.0
-        pitch = 0.0
-        q_x, q_y, q_z, q_w= euler_to_quaternion(roll, pitch, yaw)
-        geo_pose_setpoint.pose.orientation.x = q_x
-        geo_pose_setpoint.pose.orientation.y = q_y
-        geo_pose_setpoint.pose.orientation.z = q_z
-        geo_pose_setpoint.pose.orientation.w = q_w
-        
-
-        return geo_pose_setpoint
+    return geo_pose_setpoint
 
 
 
 # Do not delete this function
 def build_local_setpoint(x, y, z, yaw):
-        """
-        Builds a message for the /mavros/setpoint_position/local topic
-        """
-        local_pose_setpoint = PoseStamped()
-        local_pose_setpoint.header.stamp = rospy.Time.now()
-        local_pose_setpoint.pose.position.x = x
-        local_pose_setpoint.pose.position.y = y
-        local_pose_setpoint.pose.position.z = z
-        
-        roll = 0.0
-        pitch = 0.0
-        q_x, q_y, q_z, q_w= euler_to_quaternion(roll, pitch, yaw)
-        local_pose_setpoint.pose.orientation.x = q_x
-        local_pose_setpoint.pose.orientation.y = q_y
-        local_pose_setpoint.pose.orientation.z = q_z
-        local_pose_setpoint.pose.orientation.w = q_w
+    """
+    Builds a message for the /mavros/setpoint_position/local topic
+    """
+    local_pose_setpoint = PoseStamped()
+    local_pose_setpoint.header.stamp = rospy.Time.now()
+    local_pose_setpoint.pose.position.x = x
+    local_pose_setpoint.pose.position.y = y
+    local_pose_setpoint.pose.position.z = z
+    
+    roll = 0.0
+    pitch = 0.0
+    q_x, q_y, q_z, q_w= euler_to_quaternion(roll, pitch, yaw)
+    local_pose_setpoint.pose.orientation.x = q_x
+    local_pose_setpoint.pose.orientation.y = q_y
+    local_pose_setpoint.pose.orientation.z = q_z
+    local_pose_setpoint.pose.orientation.w = q_w
 
-        return local_pose_setpoint
+    return local_pose_setpoint
 
 
 
@@ -621,10 +650,10 @@ def set_yaw(yaw_angle_degrees):
     pose_msg = PoseStamped()
     # pose_msg.header = Header()
     # pose_msg.header.frame_id = 'base_footprint'
-    
+
     # Set only the yaw component of the quaternion
     pose_msg.pose.orientation.z = yaw_angle_radians
-    
+
     # Publish the message
     yaw_pub.publish(pose_msg)
 
@@ -811,10 +840,7 @@ def dofeedbackcontrol():
                 else: 
                     if print_stat: print('Hybrid mode: Above object: Continue ...')
                         
-                #------FOR DEBUGGING------#
-                if debugging:
-                    above_object=True
-                #-------------------------#
+
 
                 if above_object and fixed_heading_option and not moving_to_set_alt: # only do this if not already moving to setpoint                    
                     if print_flags: print("above_object = True | fixed_heading_option = True | moving_to_set_altitude = False")
@@ -906,7 +932,6 @@ def dofeedbackcontrol():
         # check if altitude setpoint reached
         if fixed_heading_option and moving_to_set_alt:
             alt_diff = alt - alt_sampling
-            if debugging: alt_diff = 0
             if print_flags: print(f'fixed_heading_option = True | moving_to_set_altitude = True')
 
             if abs(alt_diff) < 0.5:
@@ -1036,12 +1061,6 @@ def survey_flow():
         vx = []
         vy = []
 
-        #-----DEBUGGING-------#
-        if debugging:
-            for iii in range(survey_samples):
-                vx.append(1)
-                vy.append(3)
-        #---------------------#
 
         t_log = time.time()
         flow_prev = flow_x
