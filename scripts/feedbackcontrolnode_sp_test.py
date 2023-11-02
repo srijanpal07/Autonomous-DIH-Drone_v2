@@ -23,7 +23,8 @@ from filterpy.kalman import KalmanFilter
 from geopy.distance import geodesic
 
 # global EXECUTION
-EXECUTION = 'SIMULATION' # 'SIMULATION' or 'DEPLOYMENT'
+EXECUTION = rospy.get_param('EXECUTION', default='DEPLOYMENT') # 'SIMULATION' or 'DEPLOYMENT'
+print("---------------------------------------------------------------------------------------------: "+EXECUTION)
 if EXECUTION == 'SIMULATION':
     import airsim
     from airsim_ros_pkgs.msg import GimbalAngleEulerCmd, GPSYaw

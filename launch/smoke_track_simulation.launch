@@ -1,4 +1,6 @@
 <launch>
+
+	<param name="EXECUTION" value="SIMULATION"/>
 	
 	<node name="dronecamera_node" pkg="autonomousdihdrone_v2" type="stream.py" output="screen"/>
 
