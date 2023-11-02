@@ -24,6 +24,7 @@ from geopy.distance import geodesic
 
 # global EXECUTION
 EXECUTION = rospy.get_param('EXECUTION', default='DEPLOYMENT') # 'SIMULATION' or 'DEPLOYMENT'
+
 if EXECUTION == 'SIMULATION':
     import airsim
     from airsim_ros_pkgs.msg import GimbalAngleEulerCmd, GPSYaw

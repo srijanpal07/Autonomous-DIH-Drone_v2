@@ -1,4 +1,6 @@
 <launch>
+
+	<param name="EXECUTION" value="DEPLOYMENT"/>
 	
 	<node name="cameranode" pkg="autonomousdihdrone_v2" type="cameranode.py" output="screen"/>
 

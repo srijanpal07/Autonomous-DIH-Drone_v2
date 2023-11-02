@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3.10 
+#!/usr/bin/python3.8
 # license removed for brevity
 from operator import truediv
 from re import sub
@@ -17,6 +17,11 @@ import argparse
 from pathlib import Path
 import time
 import torch
+
+# global EXECUTION
+EXECUTION = rospy.get_param('EXECUTION', default='DEPLOYMENT') # 'SIMULATION' or 'DEPLOYMENT'
+print(f"EXECUTION ==>{EXECUTION}")
+
 # import torch_tensorrt
 print(f"Torch setup complete. Using torch {torch.__version__} ({torch.cuda.get_device_properties(0).name if torch.cuda.is_available() else 'CPU'})")
 
@@ -77,6 +82,12 @@ font = cv2.FONT_HERSHEY_SIMPLEX
 font_size = 1
 font_color = BLACK
 font_thickness = 2
+
+
+def time_callback(gpstime):
+    global gps_t
+    gps_t = float(gpstime.time_ref.to_sec())
+    
 
 def imagecallback(img):
     # print("imagecallback()")
@@ -219,7 +230,12 @@ def init_detection_node():
 
     # initializing node
     rospy.init_node('detection_node', anonymous=False)
-    rospy.Subscriber('front_centre_cam', Image, imagecallback)
+    if EXECUTION == 'SIMULATION':
+        rospy.Subscriber('front_centre_cam', Image, imagecallback)
+    if EXECUTION == 'DEPLOYMENT':
+        rospy.Subscriber('/camera/image', Image, imagecallback)
+        rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
+    
     # rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
     
 
