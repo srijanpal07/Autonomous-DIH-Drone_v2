@@ -20,7 +20,7 @@ import torch
 
 # global EXECUTION
 EXECUTION = rospy.get_param('EXECUTION', default='DEPLOYMENT') # 'SIMULATION' or 'DEPLOYMENT'
-print(f"EXECUTION ==>{EXECUTION}")
+print(f"EXECUTION ==> {EXECUTION}")
 
 # import torch_tensorrt
 print(f"Torch setup complete. Using torch {torch.__version__} ({torch.cuda.get_device_properties(0).name if torch.cuda.is_available() else 'CPU'})")
