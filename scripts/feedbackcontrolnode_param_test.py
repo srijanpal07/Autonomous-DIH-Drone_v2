@@ -299,7 +299,7 @@ def heading_btw_points():
     bearing_AB = math.atan2(sin(point_B[1] - point_A[1]) * cos(point_B[0]),
                             cos(point_A[0]) * sin(point_B[0]) - sin(point_A[0]) *
                             cos(point_B[0]) * cos(point_B[1] - point_A[1]))
-    
+
     heading_AB = math.degrees(bearing_AB)
     heading_AB = (heading_AB + 360) % 360
     diff_head = heading_AB - drone_heading
@@ -378,7 +378,7 @@ def rel_alt_callback(altrel):
     Returns relative GPS altitude
     """
     global gps_alt_rel
-    
+
     gps_alt_rel = altrel.data # relative altitude just from GPS data
     if print_stat:
         print(f"gps_alt_rel: {gps_alt_rel}")
@@ -518,7 +518,7 @@ def dofeedbackcontrol():
 
     publish_rate = time.time()
 
-    # ---------------------------------------------- Nate ---------------------------------------------- #
+    # ------------------------------------------ Nate ----------------------------------------- #
     #Initialize publishers/subscribers/node
     rospy.Subscriber('/mavros/local_position/pose', PoseStamped, pose_callback)
     rospy.Subscriber('/mavros/time_reference',TimeReference,time_callback)
@@ -527,16 +527,17 @@ def dofeedbackcontrol():
     rospy.Subscriber('/mavros/state',State,state_callback)
     twistpub = rospy.Publisher('/mavros/setpoint_velocity/cmd_vel_unstamped', Twist, queue_size=1)
     rcpub = rospy.Publisher('/mavros/rc/override', OverrideRCIn, queue_size=1)
-    # ---------------------------------------------- Nate ---------------------------------------------- #
+    # ------------------------------------------ Nate ----------------------------------------- #
 
-    # ---------------------------------------------- New ---------------------------------------------- #
+    # ------------------------------------------ New ------------------------------------------ #
     rospy.Subscriber('/mavros/global_position/compass_hdg',Float64,compass_hdg_callback)
-    twist_stamped_pub = rospy.Publisher('/mavros/setpoint_velocity/cmd_vel', TwistStamped, queue_size=1)
+    twist_stamped_pub = rospy.Publisher('/mavros/setpoint_velocity/cmd_vel', 
+                                        TwistStamped, queue_size=1)
     sampling_time_info_pub = rospy.Publisher('sampling_time_info_topic', Float64, queue_size=10)
 
     global start_time_track, source_gps_track
     start_time_track, source_gps_track = True, True
-    # ---------------------------------------------- New ---------------------------------------------- #
+    # ------------------------------------------ New ------------------------------------------ #
 
     # control loop
     twistmsg = Twist()
@@ -608,10 +609,12 @@ def move_to_set_alt_test():
         print("Setpoint altitude reached!")
     elif alt_diff < 1: # too low
         twistmsg.linear.z = 0.5
-        print(f'Too Low! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} | current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}', end='\r')
+        print(f'Too Low! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} |',
+              f' current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}', end='\r')
     elif alt_diff > 1: # too high
         twistmsg.linear.z = -0.5
-        print(f'Too High! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} | current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}', end='\r')
+        print(f'Too High! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} |',
+              f' current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}', end='\r')
 
     twistpub.publish(twistmsg)
     time.sleep(0.2)
@@ -645,8 +648,15 @@ def save_log():
     writing data to csv
     """
     global ver_speed, hor_speed, for_speed, yawrate
-    fid.write('%f,%f,%f,%f,%f,%f,%f,%f,%f,%s,%s,%s,%f,%f,%f,%f,%f,%f,%f,%f\n' % 
-        (time.time(),gps_t,gps_x,gps_y,alt,gps_lat,gps_long,gps_alt,gps_alt_rel,test_speed,test_move_to_alt,test_yawrate,vspeed,fspeed,hspeed,ver_speed,for_speed,hor_speed,yawrate,altitude))
+
+    # fid.write('%f,%f,%f,%f,%f,%f,%f,%f,%f,%s,%s,%s,%f,%f,%f,%f,%f,%f,%f,%f\n' %
+    #     (time.time(),gps_t,gps_x,gps_y,alt,gps_lat,gps_long,gps_alt,gps_alt_rel,
+    #       test_speed,test_move_to_alt,test_yawrate,vspeed,fspeed,hspeed,
+    #       ver_speed,for_speed,hor_speed,yawrate,altitude))
+    fid.write(f'{time.time()},{gps_t},{gps_x},{gps_y},{alt},{gps_lat},{gps_long}',
+              f'{gps_alt},{gps_alt_rel},{test_speed},{test_move_to_alt},{test_yawrate}',
+              f'{vspeed},{fspeed},{hspeed}',
+              f'{ver_speed},{for_speed},{hor_speed},{yawrate},{altitude}\n')
 
 
 
@@ -656,7 +666,6 @@ if __name__ == '__main__':
     rospy.init_node('feedbackcontrol_node', anonymous=False)
     twist_pub = rospy.Publisher('/mavros/setpoint_position/local', PoseStamped, queue_size=1)
 
-    #global EXECUTION
     print(f'Executing in ==> {EXECUTION}')
     try:
         dofeedbackcontrol()
