@@ -62,7 +62,8 @@ else:
 savedir = maindir.joinpath('%s_run%02d_fc-data' % (stamp,new_run_num))
 os.makedirs(savedir)
 fid = open(savedir.joinpath('Feedbackdata.csv'),'w')
-fid.write('Timestamp_Jetson,Timestamp_GPS,GPS_x,GPS_y,GPS_z,GPS_lat,GPS_long,GPS_alt_rel,Surveying,Sampling,MoveUp,AboveObject,Pitch,Size_error,OptFlow_On,Flow_x,Flow_y,Vspeed,Fspeed,Hspeed\n')
+fid.write('Timestamp_Jetson,Timestamp_GPS,GPS_x,GPS_y,GPS_z,GPS_lat,GPS_long,GPS_alt,GPS_alt_rel,test_speed,test_move_to_alt,test_yawrate,Vspeed,Fspeed,Hspeed,ver_speed,for_speed,hor_speed,yawrate,move_to_alt\n')
+#          (time.time(),    gps_t,        gps_x,gps_y,alt,  gps_lat,gps_long,gps_alt,gps_alt_rel,test_speed,test_move_to_alt,test_yawrate,vspeed,fspeed,hspeed,ver_speed,for_speed,hor_speed,yawrate)
 # ---------------------------- Creating a saving directory ---------------------------- #
 
 
@@ -328,10 +329,10 @@ def state_callback(state):
     if print_stat:
         print(f'state.mode={state.mode}')
 
-    if state.mode == 'OFFBOARD':
+    if state.mode == 'GUIDED':
         guided_mode = True
         if print_stat:
-            print('OFFBOARD')
+            print('GUIDED')
         if print_flags and print_state:
             print("state.mode == 'OFFBOARD' -> guided_mode = True")
             print_state = False
@@ -388,7 +389,7 @@ def arguments():
     """
     Dealing with command line inputs
     """
-    global test_speed, test_move_to_alt
+    global test_speed, test_move_to_alt, test_yawrate
     global ver_speed, hor_speed, for_speed
     global altitude
     global yawrate
@@ -396,39 +397,40 @@ def arguments():
     parser = argparse.ArgumentParser(description='')
 
     parser.add_argument('--test_speed', type=bool, default=False, 
-                        help='Perfrom speed test [True/False]')
-    parser.add_argument('--ver_speed', type=int, default=0, help='vertical speed')
-    parser.add_argument('--hor_speed', type=int, default=0, help='horizontal speed')
-    parser.add_argument('--for_speed', type=int, default=0, help='forward speed')
+                        help='Perform speed test [True/False]')
+    parser.add_argument('--ver_speed', type=float, default=0, help='vertical speed')
+    parser.add_argument('--hor_speed', type=float, default=0, help='horizontal speed')
+    parser.add_argument('--for_speed', type=float, default=0, help='forward speed')
 
     parser.add_argument('--test_move_to_alt', type=bool, default=False,
                         help='Test moving to setpoint altitude')
-    parser.add_argument('--alt', type=int, default=0, help='setpoint altitude')
+    parser.add_argument('--alt', type=float, default=0, help='setpoint altitude')
 
     parser.add_argument('--test_yawrate', type=bool, default=False,
                         help='Test yawrate')
-    parser.add_argument('--yawrate', type=int, default=0, help='yawrate')
+    parser.add_argument('--yawrate', type=float, default=0, help='yawrate')
 
     args = parser.parse_args()
 
-    test_speed = args.speed_test
-    test_move_to_alt = args.move_to_alt
-    test_yawrate = args.yawrate
+    test_speed = args.test_speed
+    test_move_to_alt = args.test_move_to_alt
+    test_yawrate = args.test_yawrate
+
+    ver_speed = args.ver_speed
+    hor_speed = args.hor_speed
+    for_speed = args.for_speed
+    altitude = args.alt
+    yawrate = args.yawrate
 
     if test_speed:
-        ver_speed = args.vspeed
-        hor_speed = args.hspeed
-        for_speed = args.fspeed
-        print(f"Speed Test:{test_speed}")
+        print(f"Running Speed Test: {test_speed}")
         print(f"vspeed:{ver_speed} | hspeed:{hor_speed} | vspeed:{for_speed}")
     if test_move_to_alt:
-        altitude = args.alt
-        print(f"Move to setpoint altitude:{test_move_to_alt}")
-        print(f"Altitude:{altitude}")
+        print(f"Running Move to setpoint altitude test: {test_move_to_alt}")
+        print(f"Altitude: {altitude}")
     if test_yawrate:
-        yawrate = args.yawrate
-        print(f"Move to setpoint altitude:{test_yawrate}")
-        print(f"Altitude:{yawrate}")
+        print(f"Running Yawrate test: {test_yawrate}")
+        print(f"yawrate: {yawrate}")
 
     return args
 
@@ -543,13 +545,16 @@ def dofeedbackcontrol():
     rate = rospy.Rate(20) # originally 10hz
 
     while not rospy.is_shutdown():
+        if guided_mode:
         #rise_up()
-        if test_speed:
-            speed_test()
-        if test_move_to_alt:
-            move_to_set_alt_test()
-        # writing control states and data to csv
-        save_log()
+            if test_speed:
+                speed_test()
+            if test_move_to_alt:
+                move_to_set_alt_test()
+            if test_yawrate:
+                yawrate_test()
+            # writing control states and data to csv
+            save_log()
         rate.sleep()
 
 
@@ -559,7 +564,7 @@ def speed_test():
     Run speed test
     """
     global ver_speed, hor_speed, for_speed
-    print(f'ver_speed: {ver_speed} | hor_speed: {hor_speed} | for_speed : {for_speed}')
+    print(f'ver_speed: {ver_speed} | hor_speed: {hor_speed} | for_speed : {for_speed}', end='\r')
 
     twistmsg.linear.x = hor_speed
     twistmsg.linear.y = for_speed
@@ -575,12 +580,12 @@ def yawrate_test():
     Run yawrate test
     """
     global yawrate
-    print(f'yawrate : {yawrate}')
+    print(f'yawrate : {yawrate}', end='\r')
 
     twistmsg.linear.x = 0
     twistmsg.linear.y = 0
     twistmsg.linear.z = 0
-    twistmsg.angular.z = 0.1
+    twistmsg.angular.z = yawrate
     twistpub.publish(twistmsg)
     time.sleep(0.2)
 
@@ -593,8 +598,6 @@ def move_to_set_alt_test():
     global altitide
     move_to_alt = altitude
     alt_diff = gps_alt - move_to_alt
-    print('Runnig move_to_set_alt Test:',
-          f'move_to_alt: {move_to_alt} | current_alt: {gps_alt} | alt_diff : {alt_diff}')
 
     twistmsg.linear.x = 0
     twistmsg.linear.y = 0
@@ -605,10 +608,10 @@ def move_to_set_alt_test():
         print("Setpoint altitude reached!")
     elif alt_diff < 1: # too low
         twistmsg.linear.z = 0.5
-        print("Too Low!")
+        print(f'Too Low! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} | current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}', end='\r')
     elif alt_diff > 1: # too high
         twistmsg.linear.z = -0.5
-        print("Too high!")
+        print(f'Too High! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} | current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}', end='\r')
 
     twistpub.publish(twistmsg)
     time.sleep(0.2)
@@ -641,8 +644,9 @@ def save_log():
     """
     writing data to csv
     """
-    fid.write('%f,%f,%f,%f,%f,%f,%f,%f,%s,%s,%s,%s,%f,%f,%s,%f,%f,%f,%f,%f\n' % 
-        (time.time(),gps_t,gps_x,gps_y,alt,gps_lat,gps_long,gps_alt_rel,str(surveying),str(sampling),str(move_up),str(above_object),pitchcommand,sizeerror,str(OPT_FLOW),flow_x,flow_y,vspeed,fspeed,hspeed))
+    global ver_speed, hor_speed, for_speed, yawrate
+    fid.write('%f,%f,%f,%f,%f,%f,%f,%f,%f,%s,%s,%s,%f,%f,%f,%f,%f,%f,%f,%f\n' % 
+        (time.time(),gps_t,gps_x,gps_y,alt,gps_lat,gps_long,gps_alt,gps_alt_rel,test_speed,test_move_to_alt,test_yawrate,vspeed,fspeed,hspeed,ver_speed,for_speed,hor_speed,yawrate,altitude))
 
 
 
