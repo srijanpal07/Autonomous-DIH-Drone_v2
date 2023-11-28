@@ -1,4 +1,5 @@
-#!/usr/bin/env python3 
+#!/usr/local/bin/python3.10
+# license removed for brevity
 
 from ast import And
 from pickle import TRUE
