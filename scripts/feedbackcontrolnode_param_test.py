@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3.10 
+#!/usr/local/bin/python3.10
 # license removed for brevity
 
 from ast import And
@@ -19,13 +19,12 @@ import sys
 import numpy as np
 import datetime, time
 from pathlib import Path
-from filterpy.kalman import KalmanFilter
-from geopy.distance import geodesic
+import argparse
+
 
 # global EXECUTION
 # EXECUTION = rospy.get_param('EXECUTION', default='DEPLOYMENT') # 'SIMULATION' or 'DEPLOYMENT'
 EXECUTION = 'DEPLOYMENT'
-
 
 
 #----------------------- OPTIONS FOR MODES (Nate) -----------------------#
@@ -37,7 +36,7 @@ USE_PITCH_ERROR = False # Previuosly True
 forward_scan_option = True # Previously False changes to True this is primarily for smoke generator and grenade experiments, otherwise hybrid mode should work well over a more static plume
 fixed_heading_option = True # this mode tells the drone to sit above the smoke for a solid 5 seconds in order to get a heading from the mean flow direction, and then it goes to a fixed height and moves in that direction
 controlled_descent_option = True
-#----------------------- OPTIONS FOR MODES (Nate) -----------------------# 
+#----------------------- OPTIONS FOR MODES (Nate) -----------------------#
 
 
 
@@ -61,7 +60,7 @@ else:
     new_run_num = 1
 
 savedir = maindir.joinpath('%s_run%02d_fc-data' % (stamp,new_run_num))
-os.makedirs(savedir)  
+os.makedirs(savedir)
 fid = open(savedir.joinpath('Feedbackdata.csv'),'w')
 fid.write('Timestamp_Jetson,Timestamp_GPS,GPS_x,GPS_y,GPS_z,GPS_lat,GPS_long,GPS_alt_rel,Surveying,Sampling,MoveUp,AboveObject,Pitch,Size_error,OptFlow_On,Flow_x,Flow_y,Vspeed,Fspeed,Hspeed\n')
 # ---------------------------- Creating a saving directory ---------------------------- #
@@ -99,6 +98,7 @@ global head, slope_deg
 global setpoint_global_pub
 global yawing_using_kalman_filter
 global proportional_gain
+global test_speed, test_move_to_alt
 #----------------------- Global Parameters (srijan) ----------------------------#
 
 
@@ -203,8 +203,6 @@ else:
     pitch_init = pitch_45
 pitchcommand = pitch_init
 yawcommand = yaw_center
-#ADDED for airsim
-airsim_yaw = 0
 publish_rate = 0
 # ---------------------------------------------------- Deployment Parameters (Nate) ---------------------------------------------------- #
 
@@ -386,199 +384,58 @@ def rel_alt_callback(altrel):
 
 
 
-def boundingbox_callback(box):
+def arguments():
     """
-    returns detection bounding box size
-    horzontal_error and vertical_error
-    positive errors give right, up
-    if box center is on LHS of image, error is positive
-    if box center is on upper half, error is positive
+    Dealing with command line inputs
     """
-    global horizontalerror, verticalerror, sizeerror
-    global time_lastbox, pitchcommand, yawcommand
-    global MOVE_ABOVE, OPT_FLOW
+    global test_speed, test_move_to_alt
+    global ver_speed, hor_speed, for_speed
+    global altitude
+    global yawrate
 
-    # positive errors give right, up
-    if box.bbox.center.x != -1:
-        if print_stat:
-            print("Bounding box found (box.bbox.center.x != -1)")
-        time_lastbox = rospy.Time.now()
-        # take the average so that a very thin, long box will still be seen as small
-        bboxsize = (box.bbox.size_x + box.bbox.size_y)/2
+    parser = argparse.ArgumentParser(description='')
 
-        # different bbox size desired for approach and above stages for hybrid mode
-        if not above_object:
-            if print_stat:
-                print("Not above object ... ")
-            # if box is smaller than setpoint, error is positive
-            sizeerror = setpoint_size_approach - bboxsize
-        else:
-            if print_stat:
-                print("above_object was set to true previously")
-            # if box is smaller than setpoit, error is positive
-            sizeerror = setpoint_size - bboxsize
+    parser.add_argument('--test_speed', type=bool, default=False, 
+                        help='Perfrom speed test [True/False]')
+    parser.add_argument('--ver_speed', type=int, default=0, help='vertical speed')
+    parser.add_argument('--hor_speed', type=int, default=0, help='horizontal speed')
+    parser.add_argument('--for_speed', type=int, default=0, help='forward speed')
 
-        if print_size_error:
-            print(f'Setpoint - bbox (sizeerror) = {sizeerror}')
+    parser.add_argument('--test_move_to_alt', type=bool, default=False,
+                        help='Test moving to setpoint altitude')
+    parser.add_argument('--alt', type=int, default=0, help='setpoint altitude')
 
-        if not OPT_FLOW:
-            if print_stat:
-                print("OPT_FLOW is set to False: Optical flow not running")
+    parser.add_argument('--test_yawrate', type=bool, default=False,
+                        help='Test yawrate')
+    parser.add_argument('--yawrate', type=int, default=0, help='yawrate')
 
-            # if box center is on LHS of image, error is positive
-            horizontalerror = .5-box.bbox.center.x
-            # if box center is on upper half of image, error is positive
-            verticalerror = .5-box.bbox.center.y
+    args = parser.parse_args()
 
-            if print_stat:
-                print(f'Horzontal error: {round(horizontalerror, 5)}',
-                      f'Vertical error: {round(verticalerror, 5)}')
-                #print(f"Changed pitchcommand,delta: {round(pitchcommand, 5)},{round(pitchdelta, 5)}",
-                #       f"changed yawcommand, delta: {round(yawcommand, 5)},{round(yawdelta, 5)}")
+    test_speed = args.speed_test
+    test_move_to_alt = args.move_to_alt
+    test_yawrate = args.yawrate
 
-        # if close and gimbal pitched upward, move to get above the object
-        if pitchcommand < pitch_thresh and bboxsize > 0.75:
-            MOVE_ABOVE = True
-            if print_stat:
-                print('Gimbal pitched upward moving above to get above object ...',
-                      ': MOVE_ABOVE is set to True')
-    else:
-        if print_stat:
-            print("Bounding box not found (box.bbox.center.x = -1)")
+    if test_speed:
+        ver_speed = args.vspeed
+        hor_speed = args.hspeed
+        for_speed = args.fspeed
+        print(f"Speed Test:{test_speed}")
+        print(f"vspeed:{ver_speed} | hspeed:{hor_speed} | vspeed:{for_speed}")
+    if test_move_to_alt:
+        altitude = args.alt
+        print(f"Move to setpoint altitude:{test_move_to_alt}")
+        print(f"Altitude:{altitude}")
+    if test_yawrate:
+        yawrate = args.yawrate
+        print(f"Move to setpoint altitude:{test_yawrate}")
+        print(f"Altitude:{yawrate}")
 
-    return
-
-
-
-def segmentation_callback(box):
-    """
-    returns smoke segmentation predictions
-    """
-    global horizontalerror_smoketrack, verticalerror_smoketrack, sizeerror_smoketrack, horizontalerror_smoketrack_list
-    global time_lastbox_smoketrack, pitchcommand, yawcommand
-    global MOVE_ABOVE, OPT_FLOW
-    global kf, previous_yaw_measurements
-    global sampling
-    global yawing_using_kalman_filter
-
-    # positive errors give right, up
-    if box.bbox.center.x != -1 and box.bbox.size_x > 2000:
-        if print_stat and sampling:
-            print("Sampling ... Yawing using Segmentation")
-        yawing_using_kalman_filter  = False
-        time_lastbox_smoketrack = rospy.Time.now()
-        # take the average so that a very thin, long box will still be seen as small
-        # bboxsize = (box.bbox.size_x + box.bbox.size_y)/2
-
-        # different bbox size desired for approach and above stages for hybrid mode
-        if not above_object:
-            if print_stat:
-                print("Not above object ... ")
-            # setpoint_size_approach - bboxsize # if box is smaller than setpoit, error is positive
-            sizeerror_smoketrack = 0
-        else:
-            if print_stat:
-                print("above_object was set to true previously")
-            # setpoint_size - bboxsize # if box is smaller than setpoit, error is positive
-            sizeerror_smoketrack = 0
-
-        if print_size_error:
-            print(f'Setpoint - bbox (sizeerror) = {sizeerror_smoketrack}')
-
-        if not OPT_FLOW:
-            if print_stat:
-                print("OPT_FLOW is set to False: Optical flow not running")
-            # if box center is on LHS of image, error is positive
-            horizontalerror_smoketrack = .5-box.bbox.center.x
-            # if box center is on upper half of image, error is positive
-            verticalerror_smoketrack = .5-box.bbox.center.y
-
-            if print_stat:
-                print(f'Horzontal error: {round(horizontalerror_smoketrack, 5)}',
-                      f'Vertical error: {round(verticalerror, 5)}')
-
-        # if close and gimbal pitched upward, move to get above the object
-        # if pitchcommand < pitch_thresh and bboxsize > 0.75:
-        #     MOVE_ABOVE = True
-        #     if print_stat: print('Gimbal pitched upward moving above to get above object',
-        #                           '... : MOVE_ABOVE is set to True')
-
-    return
-
-
-
-def keypoint_callback(box):
-    """
-    returns smoke keypoints predictions
-    """
-    global horizontalerror_keypoint, verticalerror_keypoint
-    global time_lastbox_keypoint, MOVE_ABOVE, OPT_FLOW
-
-    # positive errors give right, up
-    if box.bbox.center.x != -1:
-        time_lastbox_keypoint = rospy.Time.now()
-        # if smoke source keypoint is on LHS of image, error is positive
-        horizontalerror_keypoint = 0.5-box.bbox.center.x
-        # if smoke source keypoint is on upper half of image, error is positive
-        verticalerror_keypoint = 0.5-box.bbox.center.y
-    else:
-        horizontalerror_keypoint = 0
-        verticalerror_keypoint = 0
-    return
-
-
-
-def flow_callback(flow):
-    """
-    Returns optical flow predictions
-    """
-    global horizontalerror, verticalerror,time_lastbox
-    global pitchcommand, yawcommand
-    global flow_x,flow_y,flow_t
-    global OPT_FLOW,OPT_COMPUTE_FLAG
-
-    # typical values might be around 10 pixels, depending on frame rate
-    flow_x = flow.size_x # movement to the right in the image is positive
-    # this is made negative so that positive flow_y means the object was moving toward the top of the image
-    # (RAFT returns negative y for this (i.e., toward smaller y coordinates))
-    flow_y = -flow.size_y
-    # now movement to the top is positive flow_y
-    flow_t = float(gps_t)
-
-    # adjust the feedback error using the optical flow
-    if OPT_FLOW:
-        if print_stat:
-            print('Doing optical flow feedback ...')
-        # this signals to later in the code that the first usable optical flow data can be applied
-        # (instead of inheriting errors from bbox callback)
-        OPT_COMPUTE_FLAG = True 
-        horizontalerror = -flow_x # to be consistent with the bounding box error
-        verticalerror = flow_y
-        if not above_object: # this should never end up being called normally, just for debugging optical flow in side-view
-            # pitch
-            pitchdelta = verticalerror * gimbal_pitch_gain
-            pitchdelta = min(max(pitchdelta,-limit_pitchchange),limit_pitchchange)
-            pitchcommand += pitchdelta
-            pitchcommand = min(max(pitchcommand,1000),2000)
-            yawdelta = horizontalerror * gimbal_yaw_gain
-            yawdelta = min(max(yawdelta,-limit_yawchange),limit_yawchange)
-            yawcommand += yawdelta
-            yawcommand = min(max(yawcommand,1000),2000)
-        if print_flow:
-            if print_stat:
-                print(f'Flow x,y = {flow_x},{flow_y}')
-                print(f'horizontal error: {horizontalerror}, verticalerror: {verticalerror}')
-
-        time_lastbox = rospy.Time.now()
-    else:
-        if print_stat:
-            print("OPT_FLOW was turned off: OPT_FLOW = False")
-    return
+    return args
 
 
 
 # Do not delete this function
-def build_local_setpoint(x, y, z, yaw):
+def build_local_setpoint(x, y, z, yaw_):
     """
     Builds a message for the /mavros/setpoint_position/local topic
     """
@@ -590,7 +447,7 @@ def build_local_setpoint(x, y, z, yaw):
 
     roll = 0.0
     pitch = 0.0
-    q_x, q_y, q_z, q_w= euler_to_quaternion(roll, pitch, yaw)
+    q_x, q_y, q_z, q_w= euler_to_quaternion(roll, pitch, yaw_)
     local_pose_setpoint.pose.orientation.x = q_x
     local_pose_setpoint.pose.orientation.y = q_y
     local_pose_setpoint.pose.orientation.z = q_z
@@ -613,24 +470,26 @@ def send_velocity_command(forward_speed, lateral_speed, vertical_speed, correcti
     y_speed = (math.sin(yaw)*forward_speed - math.cos(yaw)*lateral_speed)*(0.3)
     z_speed = vertical_speed
 
-    # Set linear velocity for forward motion (in the body frame)
+    # Set linear velocity for forward, lateral, vertical motion (in the body frame)
     cmd_vel.twist.linear.x = x_speed
-    # Set linear velocity for lateral motion (in the body frame)
     cmd_vel.twist.linear.y = y_speed
-    # Set linear velocity for vertical motion (in the body frame)
     cmd_vel.twist.linear.z = z_speed
-    # Set linear velocity for lateral motion (in the body frame)
+    # Set angular velocity for yaw motion (in the body frame)
     cmd_vel.twist.angular.z = correction_yaw_rate
 
     if print_stat:
         print(f'Command Velocity: x_speed: {x_speed} | y_speed: {y_speed} |',
               f'z_angular: {correction_yaw_rate}')
+
     # Publish the TwistStamped message
     twist_stamped_pub.publish(cmd_vel)
 
-# ----------------------------- TRY ----------------------------- #
+
 
 def dofeedbackcontrol():
+    """
+    main loop
+    """
     # ----------------------------- Nate ----------------------------- #
     global pitchcommand, yawcommand
     global above_object, forward_scan
@@ -657,21 +516,16 @@ def dofeedbackcontrol():
 
     publish_rate = time.time()
 
-
     # ---------------------------------------------- Nate ---------------------------------------------- #
     #Initialize publishers/subscribers/node
-    #rospy.Subscriber('/bounding_box', Detection2D, boundingbox_callback)
     rospy.Subscriber('/mavros/local_position/pose', PoseStamped, pose_callback)
     rospy.Subscriber('/mavros/time_reference',TimeReference,time_callback)
     rospy.Subscriber('/mavros/global_position/global',NavSatFix,gps_callback)
     rospy.Subscriber('/mavros/global_position/rel_alt',Float64,rel_alt_callback)
-    rospy.Subscriber('/flow',BoundingBox2D,flow_callback)
     rospy.Subscriber('/mavros/state',State,state_callback)
     twistpub = rospy.Publisher('/mavros/setpoint_velocity/cmd_vel_unstamped', Twist, queue_size=1)
     rcpub = rospy.Publisher('/mavros/rc/override', OverrideRCIn, queue_size=1)
     # ---------------------------------------------- Nate ---------------------------------------------- #
-
-
 
     # ---------------------------------------------- New ---------------------------------------------- #
     rospy.Subscriber('/mavros/global_position/compass_hdg',Float64,compass_hdg_callback)
@@ -682,22 +536,82 @@ def dofeedbackcontrol():
     start_time_track, source_gps_track = True, True
     # ---------------------------------------------- New ---------------------------------------------- #
 
-
     # control loop
     twistmsg = Twist()
     rcmsg = OverrideRCIn()
     rcmsg.channels = np.zeros(18,dtype=np.uint16).tolist()
-
     rate = rospy.Rate(20) # originally 10hz
 
-
     while not rospy.is_shutdown():
-        rise_up()
-
+        #rise_up()
+        if test_speed:
+            speed_test()
+        if test_move_to_alt:
+            move_to_set_alt_test()
         # writing control states and data to csv
         save_log()
-
         rate.sleep()
+
+
+
+def speed_test():
+    """
+    Run speed test
+    """
+    global ver_speed, hor_speed, for_speed
+    print(f'ver_speed: {ver_speed} | hor_speed: {hor_speed} | for_speed : {for_speed}')
+
+    twistmsg.linear.x = hor_speed
+    twistmsg.linear.y = for_speed
+    twistmsg.linear.z = ver_speed
+    twistmsg.angular.z = 0
+    twistpub.publish(twistmsg)
+    time.sleep(0.2)
+
+
+
+def yawrate_test():
+    """
+    Run yawrate test
+    """
+    global yawrate
+    print(f'yawrate : {yawrate}')
+
+    twistmsg.linear.x = 0
+    twistmsg.linear.y = 0
+    twistmsg.linear.z = 0
+    twistmsg.angular.z = 0.1
+    twistpub.publish(twistmsg)
+    time.sleep(0.2)
+
+
+
+def move_to_set_alt_test():
+    """
+    Run move_to_set_alt test
+    """
+    global altitide
+    move_to_alt = altitude
+    alt_diff = gps_alt - move_to_alt
+    print('Runnig move_to_set_alt Test:',
+          f'move_to_alt: {move_to_alt} | current_alt: {gps_alt} | alt_diff : {alt_diff}')
+
+    twistmsg.linear.x = 0
+    twistmsg.linear.y = 0
+    twistmsg.angular.z = 0
+
+    if abs(alt_diff) < 0.3:
+        twistmsg.linear.z = 0
+        print("Setpoint altitude reached!")
+    elif alt_diff < 1: # too low
+        twistmsg.linear.z = 0.5
+        print("Too Low!")
+    elif alt_diff > 1: # too high
+        twistmsg.linear.z = -0.5
+        print("Too high!")
+
+    twistpub.publish(twistmsg)
+    time.sleep(0.2)
 
 
 
@@ -733,6 +647,7 @@ def save_log():
 
 
 if __name__ == '__main__':
+    arguments()
     print("Initializing feedback node...")
     rospy.init_node('feedbackcontrol_node', anonymous=False)
     twist_pub = rospy.Publisher('/mavros/setpoint_position/local', PoseStamped, queue_size=1)
@@ -743,3 +658,194 @@ if __name__ == '__main__':
         dofeedbackcontrol()
     except rospy.ROSInterruptException:
         pass
+
+
+
+# def boundingbox_callback(box):
+#     """
+#     returns detection bounding box size
+#     horzontal_error and vertical_error
+#     positive errors give right, up
+#     if box center is on LHS of image, error is positive
+#     if box center is on upper half, error is positive
+#     """
+#     global horizontalerror, verticalerror, sizeerror
+#     global time_lastbox, pitchcommand, yawcommand
+#     global MOVE_ABOVE, OPT_FLOW
+
+#     # positive errors give right, up
+#     if box.bbox.center.x != -1:
+#         if print_stat:
+#             print("Bounding box found (box.bbox.center.x != -1)")
+#         time_lastbox = rospy.Time.now()
+#         # take the average so that a very thin, long box will still be seen as small
+#         bboxsize = (box.bbox.size_x + box.bbox.size_y)/2
+
+#         # different bbox size desired for approach and above stages for hybrid mode
+#         if not above_object:
+#             if print_stat:
+#                 print("Not above object ... ")
+#             # if box is smaller than setpoint, error is positive
+#             sizeerror = setpoint_size_approach - bboxsize
+#         else:
+#             if print_stat:
+#                 print("above_object was set to true previously")
+#             # if box is smaller than setpoit, error is positive
+#             sizeerror = setpoint_size - bboxsize
+
+#         if print_size_error:
+#             print(f'Setpoint - bbox (sizeerror) = {sizeerror}')
+
+#         if not OPT_FLOW:
+#             if print_stat:
+#                 print("OPT_FLOW is set to False: Optical flow not running")
+
+#             # if box center is on LHS of image, error is positive
+#             horizontalerror = .5-box.bbox.center.x
+#             # if box center is on upper half of image, error is positive
+#             verticalerror = .5-box.bbox.center.y
+
+#             if print_stat:
+#                 print(f'Horzontal error: {round(horizontalerror, 5)}',
+#                       f'Vertical error: {round(verticalerror, 5)}')
+#                 #print(f"Changed pitchcommand,delta: {round(pitchcommand, 5)},{round(pitchdelta, 5)}",
+#                 #       f"changed yawcommand, delta: {round(yawcommand, 5)},{round(yawdelta, 5)}")
+
+#         # if close and gimbal pitched upward, move to get above the object
+#         if pitchcommand < pitch_thresh and bboxsize > 0.75:
+#             MOVE_ABOVE = True
+#             if print_stat:
+#                 print('Gimbal pitched upward moving above to get above object ...',
+#                       ': MOVE_ABOVE is set to True')
+#     else:
+#         if print_stat:
+#             print("Bounding box not found (box.bbox.center.x = -1)")
+
+#     return
+
+
+
+# def segmentation_callback(box):
+#     """
+#     returns smoke segmentation predictions
+#     """
+#     global horizontalerror_smoketrack, verticalerror_smoketrack, sizeerror_smoketrack, horizontalerror_smoketrack_list
+#     global time_lastbox_smoketrack, pitchcommand, yawcommand
+#     global MOVE_ABOVE, OPT_FLOW
+#     global kf, previous_yaw_measurements
+#     global sampling
+#     global yawing_using_kalman_filter
+
+#     # positive errors give right, up
+#     if box.bbox.center.x != -1 and box.bbox.size_x > 2000:
+#         if print_stat and sampling:
+#             print("Sampling ... Yawing using Segmentation")
+#         yawing_using_kalman_filter  = False
+#         time_lastbox_smoketrack = rospy.Time.now()
+#         # take the average so that a very thin, long box will still be seen as small
+#         # bboxsize = (box.bbox.size_x + box.bbox.size_y)/2
+
+#         # different bbox size desired for approach and above stages for hybrid mode
+#         if not above_object:
+#             if print_stat:
+#                 print("Not above object ... ")
+#             # setpoint_size_approach - bboxsize # if box is smaller than setpoit, error is positive
+#             sizeerror_smoketrack = 0
+#         else:
+#             if print_stat:
+#                 print("above_object was set to true previously")
+#             # setpoint_size - bboxsize # if box is smaller than setpoit, error is positive
+#             sizeerror_smoketrack = 0
+
+#         if print_size_error:
+#             print(f'Setpoint - bbox (sizeerror) = {sizeerror_smoketrack}')
+
+#         if not OPT_FLOW:
+#             if print_stat:
+#                 print("OPT_FLOW is set to False: Optical flow not running")
+#             # if box center is on LHS of image, error is positive
+#             horizontalerror_smoketrack = .5-box.bbox.center.x
+#             # if box center is on upper half of image, error is positive
+#             verticalerror_smoketrack = .5-box.bbox.center.y
+
+#             if print_stat:
+#                 print(f'Horzontal error: {round(horizontalerror_smoketrack, 5)}',
+#                       f'Vertical error: {round(verticalerror, 5)}')
+
+#         # if close and gimbal pitched upward, move to get above the object
+#         # if pitchcommand < pitch_thresh and bboxsize > 0.75:
+#         #     MOVE_ABOVE = True
+#         #     if print_stat: print('Gimbal pitched upward moving above to get above object',
+#         #                           '... : MOVE_ABOVE is set to True')
+
+#     return
+
+
+
+# def keypoint_callback(box):
+#     """
+#     returns smoke keypoints predictions
+#     """
+#     global horizontalerror_keypoint, verticalerror_keypoint
+#     global time_lastbox_keypoint, MOVE_ABOVE, OPT_FLOW
+
+#     # positive errors give right, up
+#     if box.bbox.center.x != -1:
+#         time_lastbox_keypoint = rospy.Time.now()
+#         # if smoke source keypoint is on LHS of image, error is positive
+#         horizontalerror_keypoint = 0.5-box.bbox.center.x
+#         # if smoke source keypoint is on upper half of image, error is positive
+#         verticalerror_keypoint = 0.5-box.bbox.center.y
+#     else:
+#         horizontalerror_keypoint = 0
+#         verticalerror_keypoint = 0
+#     return
+
+
+
+# def flow_callback(flow):
+#     """
+#     Returns optical flow predictions
+#     """
+#     global horizontalerror, verticalerror,time_lastbox
+#     global pitchcommand, yawcommand
+#     global flow_x,flow_y,flow_t
+#     global OPT_FLOW,OPT_COMPUTE_FLAG
+
+#     # typical values might be around 10 pixels, depending on frame rate
+#     flow_x = flow.size_x # movement to the right in the image is positive
+#     # this is made negative so that positive flow_y means the object was moving toward the top of the image
+#     # (RAFT returns negative y for this (i.e., toward smaller y coordinates))
+#     flow_y = -flow.size_y
+#     # now movement to the top is positive flow_y
+#     flow_t = float(gps_t)
+
+#     # adjust the feedback error using the optical flow
+#     if OPT_FLOW:
+#         if print_stat:
+#             print('Doing optical flow feedback ...')
+#         # this signals to later in the code that the first usable optical flow data can be applied
+#         # (instead of inheriting errors from bbox callback)
+#         OPT_COMPUTE_FLAG = True
+#         horizontalerror = -flow_x # to be consistent with the bounding box error
+#         verticalerror = flow_y
+#         if not above_object: # this should never end up being called normally, just for debugging optical flow in side-view
+#             # pitch
+#             pitchdelta = verticalerror * gimbal_pitch_gain
+#             pitchdelta = min(max(pitchdelta,-limit_pitchchange),limit_pitchchange)
+#             pitchcommand += pitchdelta
+#             pitchcommand = min(max(pitchcommand,1000),2000)
+#             yawdelta = horizontalerror * gimbal_yaw_gain
+#             yawdelta = min(max(yawdelta,-limit_yawchange),limit_yawchange)
+#             yawcommand += yawdelta
+#             yawcommand = min(max(yawcommand,1000),2000)
+#         if print_flow:
+#             if print_stat:
+#                 print(f'Flow x,y = {flow_x},{flow_y}')
+#                 print(f'horizontal error: {horizontalerror}, verticalerror: {verticalerror}')
+
+#         time_lastbox = rospy.Time.now()
+#     else:
+#         if print_stat:
+#             print("OPT_FLOW was turned off: OPT_FLOW = False")
+#     return
