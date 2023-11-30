@@ -784,7 +784,7 @@ def dofeedbackcontrol():
         else:
             if print_stat: print("Forward scan turned off as scanning for object was completed")
             if print_stat: print('Either forward_scan_option = False or forward_scan = False')
-        
+
         #feedback control algorithm
         #don't publish if message is old
         if not guided_mode:
@@ -871,8 +871,9 @@ def dofeedbackcontrol():
                         fspeed *= fspeed_adjust
                 
                 # vertical movement depending on the minimum altitude safeguard
-                if above_object: 
-                    if not fixed_heading_option: vspeed = -sizeerror * vertical_gain # size error is negative because you want to move down (negative velocity) to get closer  
+                if above_object:
+                    if not fixed_heading_option: 
+                        vspeed = -sizeerror * vertical_gain # size error is negative because you want to move down (negative velocity) to get closer  
                 else: vspeed=0
 
                 # assigning gimbal pitch and yaw depending on mode
@@ -913,7 +914,7 @@ def dofeedbackcontrol():
             # if nothing detected for 5 seconds, reset gimbal position, and if more than 10 seconds, go back to manual control from RC
             # also reinitializes other settings
             print('#--------------RESETTING....------------#')
-            pitchcommand = pitch_init 
+            pitchcommand = pitch_init
             yawcommand = yaw_center
             fspeed = hspeed = vspeed = 0
             yaw_mode = True # turn yaw back on

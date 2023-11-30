@@ -389,38 +389,47 @@ def arguments():
     """
     Dealing with command line inputs
     """
-    global test_speed, test_move_to_alt, test_yawrate
+    global test_speed, test_move_to_alt, test_yawrate, test_yaw_to_dir
     global ver_speed, hor_speed, for_speed
     global altitude
     global yawrate
+    global hspd_surv, fspd_surv
 
     parser = argparse.ArgumentParser(description='')
 
-    parser.add_argument('--test_speed', type=bool, default=False, 
+    parser.add_argument('--test_speed', type=bool, default=False,
                         help='Perform speed test [True/False]')
     parser.add_argument('--ver_speed', type=float, default=0, help='vertical speed')
     parser.add_argument('--hor_speed', type=float, default=0, help='horizontal speed')
     parser.add_argument('--for_speed', type=float, default=0, help='forward speed')
 
     parser.add_argument('--test_move_to_alt', type=bool, default=False,
-                        help='Test moving to setpoint altitude')
+                        help='Test moving to setpoint altitude [True/False]')
     parser.add_argument('--alt', type=float, default=0, help='setpoint altitude')
 
     parser.add_argument('--test_yawrate', type=bool, default=False,
-                        help='Test yawrate')
+                        help='Test yawrate [True/False]')
     parser.add_argument('--yawrate', type=float, default=0, help='yawrate')
+
+    parser.add_argument('--test_yaw_to_dir', type=bool, default=False,
+                        help='Test yaw to specific direction [True/False]')
+    parser.add_argument('--fspd_surv', type=float, default=0, help='fspeed_survey')
+    parser.add_argument('--hspd_surv', type=float, default=0, help='hspeed_survey')
 
     args = parser.parse_args()
 
     test_speed = args.test_speed
     test_move_to_alt = args.test_move_to_alt
     test_yawrate = args.test_yawrate
+    test_yaw_to_dir = args.test_yaw_to_dir
 
     ver_speed = args.ver_speed
     hor_speed = args.hor_speed
     for_speed = args.for_speed
     altitude = args.alt
     yawrate = args.yawrate
+    fspd_surv = args.fspd_surv
+    hspd_surv = args.hspd_surv
 
     if test_speed:
         print(f"Running Speed Test: {test_speed}")
@@ -431,6 +440,10 @@ def arguments():
     if test_yawrate:
         print(f"Running Yawrate test: {test_yawrate}")
         print(f"yawrate: {yawrate}")
+    if test_yaw_to_dir:
+        print(f"Running Yaw to direction test: {test_yaw_to_dir}")
+        print(f"fspeed_survey: {fspd_surv}")
+        print(f"hspeed_survey: {hspd_surv}")
 
     return args
 
@@ -515,6 +528,7 @@ def dofeedbackcontrol():
     global horizontalerror_keypoint, verticalerror_keypoint
     global yaw_pub, twist_stamped_pub
     global sampling_time_info_pub
+    global hspd_surv, fspd_surv
 
     publish_rate = time.time()
 
@@ -531,7 +545,7 @@ def dofeedbackcontrol():
 
     # ------------------------------------------ New ------------------------------------------ #
     rospy.Subscriber('/mavros/global_position/compass_hdg',Float64,compass_hdg_callback)
-    twist_stamped_pub = rospy.Publisher('/mavros/setpoint_velocity/cmd_vel', 
+    twist_stamped_pub = rospy.Publisher('/mavros/setpoint_velocity/cmd_vel',
                                         TwistStamped, queue_size=1)
     sampling_time_info_pub = rospy.Publisher('sampling_time_info_topic', Float64, queue_size=10)
 
@@ -554,6 +568,8 @@ def dofeedbackcontrol():
                 move_to_set_alt_test()
             if test_yawrate:
                 yawrate_test()
+            if test_yaw_to_dir:
+                yaw_to_dir_test(hspd_surv, fspd_surv)
             # writing control states and data to csv
             save_log()
         rate.sleep()
@@ -567,8 +583,8 @@ def speed_test():
     global ver_speed, hor_speed, for_speed
     print(f'ver_speed: {ver_speed} | hor_speed: {hor_speed} | for_speed : {for_speed}', end='\r')
 
-    twistmsg.linear.x = hor_speed
-    twistmsg.linear.y = for_speed
+    twistmsg.linear.x = for_speed
+    twistmsg.linear.y = hor_speed
     twistmsg.linear.z = ver_speed
     twistmsg.angular.z = 0
     twistpub.publish(twistmsg)
@@ -618,6 +634,45 @@ def move_to_set_alt_test():
 
     twistpub.publish(twistmsg)
     time.sleep(0.2)
+
+
+def yaw_to_dir_test(h_surv, f_surv):
+    """
+    Run yaw to specific direction test
+    """
+    print(f'yaw: {yaw}')
+    twistmsg.linear.x = 0
+    twistmsg.linear.y = 0
+    twistmsg.linear.z = 0
+    yaw_speed = 0.05
+    precision = 0.009 # previously 0.005
+    low_yawspeed = False
+    if h_surv > 0:
+        yaw_speed = -yaw_speed
+
+    dir_surv = math.atan2(f_surv, h_surv) + (3.141592653589793/2)
+    print(f'dir_surv: {dir_surv}')
+    twistmsg.angular.z = yaw_speed
+
+    while True:
+        if low_yawspeed and (yaw <= dir_surv+precision and yaw >= dir_surv-precision):
+            break
+        elif not low_yawspeed and (yaw <= dir_surv+0.5 and yaw > dir_surv+precision):
+            yaw_speed = yaw_speed/5
+            low_yawspeed = True
+        elif not low_yawspeed and (yaw < dir_surv-precision and yaw >= dir_surv-0.5):
+            yaw_speed = yaw_speed/5
+            low_yawspeed = True
+
+        twistmsg.angular.z = yaw_speed
+        twistpub.publish(twistmsg)
+
+    print(f'Yaw Complete: yaw - {yaw}')
+    twistmsg.linear.x = 0
+    twistmsg.linear.y = 0
+    twistmsg.linear.z = 0
+    twistmsg.angular.z = 0
+    twistpub.publish(twistmsg)
 
 
 
