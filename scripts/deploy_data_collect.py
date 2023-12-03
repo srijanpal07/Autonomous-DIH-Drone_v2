@@ -1,8 +1,8 @@
-#!/usr/local/bin/python3.10
+#!/usr/bin/python3
+# license removed for brevity
 
 import msgpackrpc
 import rospy
-import airsim
 import numpy as np
 from sensor_msgs.msg import Image
 import cv2
@@ -10,16 +10,16 @@ import os, re
 from pathlib import Path
 import sys, datetime
 from std_msgs.msg import String
-HOST = '127.0.0.1' # Standard loopback interface address (localhost)
-from platform import uname
-if 'linux' in uname().system.lower() and 'microsoft' in uname().release.lower(): # In WSL2
-    if 'WSL_HOST_IP' in os.environ:
-        HOST = os.environ['WSL_HOST_IP']
-print("Using WSL2 Host IP address: ", HOST)
+# HOST = '127.0.0.1' # Standard loopback interface address (localhost)
+# from platform import uname
+# if 'linux' in uname().system.lower() and 'microsoft' in uname().release.lower(): # In WSL2
+#     if 'WSL_HOST_IP' in os.environ:
+#         HOST = os.environ['WSL_HOST_IP']
+# print("Using WSL2 Host IP address: ", HOST)
 # client = airSim.multiiRotorClient(ip=HOST)
-client = airsim.MultirotorClient(ip=HOST)
-client.confirmConnection()
-client.enableApiControl(True)
+# client = airsim.MultirotorClient(ip=HOST)
+# client.confirmConnection()
+# client.enableApiControl(True)
 
 
 global view_img, save_img, save_format

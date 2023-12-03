@@ -1,5 +1,6 @@
-#!/usr/bin/python3.8
+#!/usr/bin/python3
 # license removed for brevity
+
 from operator import truediv
 from re import sub
 import rospy

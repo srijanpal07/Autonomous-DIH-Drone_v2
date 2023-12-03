@@ -626,11 +626,11 @@ def move_to_set_alt_test():
     elif alt_diff < 1: # too low
         twistmsg.linear.z = 0.5
         print(f'Too Low! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} |',
-              f' current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}', end='\r')
+              f' current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}')
     elif alt_diff > 1: # too high
         twistmsg.linear.z = -0.5
         print(f'Too High! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} |',
-              f' current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}', end='\r')
+              f' current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}')
 
     twistpub.publish(twistmsg)
     time.sleep(0.2)
@@ -708,10 +708,7 @@ def save_log():
     #     (time.time(),gps_t,gps_x,gps_y,alt,gps_lat,gps_long,gps_alt,gps_alt_rel,
     #       test_speed,test_move_to_alt,test_yawrate,vspeed,fspeed,hspeed,
     #       ver_speed,for_speed,hor_speed,yawrate,altitude))
-    fid.write(f'{time.time()},{gps_t},{gps_x},{gps_y},{alt},{gps_lat},{gps_long}',
-              f'{gps_alt},{gps_alt_rel},{test_speed},{test_move_to_alt},{test_yawrate}',
-              f'{vspeed},{fspeed},{hspeed}',
-              f'{ver_speed},{for_speed},{hor_speed},{yawrate},{altitude}\n')
+    fid.write(f'{time.time()},{gps_t},{gps_x},{gps_y},{alt},{gps_lat},{gps_long},{gps_alt},{gps_alt_rel},{test_speed},{test_move_to_alt},{test_yawrate},{vspeed},{fspeed},{hspeed},{ver_speed},{for_speed},{hor_speed},{yawrate},{altitude}\n')
 
 
 
