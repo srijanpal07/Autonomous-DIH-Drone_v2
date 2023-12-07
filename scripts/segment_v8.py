@@ -120,7 +120,11 @@ def time_info_callback(data):
     print(f"Received timestamp: {sampling_time_passed} secs ------- threshold reduced to : threshold: {threshold}", end='\r')
 
 
-
+def time_callback(gpstime):
+    global gps_t
+    gps_t = float(gpstime.time_ref.to_sec())
+    
+    
 
 def imagecallback(img):
     global pub,box,video,timelog
@@ -129,6 +133,18 @@ def imagecallback(img):
 
     # converting image to numpy array
     img_numpy = np.frombuffer(img.data,dtype=np.uint8).reshape(img.height,img.width,-1)
+    
+    if False:
+        result_ = img_numpy
+        scale_percent = 25 # percent of original size
+        width = int(result_.shape[1] * scale_percent / 100)
+        height = int(result_.shape[0] * scale_percent / 100)
+        dim = (width, height)
+        
+        # resize image
+        resized_ = cv2.resize(result_, dim, interpolation = cv2.INTER_AREA)
+        cv2.imshow('Segmentation',resized_)
+        cv2.waitKey(1)  # 1 millisecond
 
     if rospy.Time.now() - img.header.stamp > rospy.Duration(max_delay):
         #print("DetectionNode: dropping old image from detection\n")
@@ -253,7 +269,7 @@ def imagecallback(img):
             elif save_format == '.avi':
                 video.write(img_numpy)
             else:
-                cv2.imwrite(str(savedir.joinpath('Segmentation-%06.0f.jpg' % savenum),img_numpy))
+                cv2.imwrite(str(savedir.joinpath('Segmentation-%06.0f.jpg' % savenum)),img_numpy)
         
         
 
@@ -281,8 +297,12 @@ def init_detection_node():
 
     # initializing node
     rospy.init_node('segmentation_node', anonymous=False)
-    rospy.Subscriber('front_centre_cam', Image, imagecallback)
     rospy.Subscriber('sampling_time_info_topic', Float64, time_info_callback)
+    if EXECUTION == 'SIMULATION':
+        rospy.Subscriber('front_centre_cam', Image, imagecallback)
+    if EXECUTION == 'DEPLOYMENT':
+        rospy.Subscriber('/camera/image', Image, imagecallback)
+        rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
     
     rospy.spin()
 

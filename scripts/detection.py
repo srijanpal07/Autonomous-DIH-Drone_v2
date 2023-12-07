@@ -106,6 +106,18 @@ def imagecallback(img):
     global imgsz, model, device, names
     box = Detection2D()
     img_numpy = np.frombuffer(img.data,dtype=np.uint8).reshape(img.height,img.width,-1)
+    
+    if True:
+        result_ = img_numpy
+        scale_percent = 25 # percent of original size
+        width = int(result_.shape[1] * scale_percent / 100)
+        height = int(result_.shape[0] * scale_percent / 100)
+        dim = (width, height)
+        
+        # resize image
+        resized_ = cv2.resize(result_, dim, interpolation = cv2.INTER_AREA)
+        cv2.imshow('Detection',resized_)
+        cv2.waitKey(1)  # 1 millisecond
 
     if rospy.Time.now() - img.header.stamp > rospy.Duration(max_delay):
         print("DetectionNode: dropping old image from detection\n")
@@ -158,7 +170,7 @@ def imagecallback(img):
         elif save_format == '.avi':
             video.write(img_numpy)
         else:
-            cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum),img_numpy))
+            cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum)),img_numpy)
     
     if VIEW_IMG:
         result = img_numpy

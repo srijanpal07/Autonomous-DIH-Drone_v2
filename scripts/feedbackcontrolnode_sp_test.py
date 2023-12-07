@@ -404,9 +404,9 @@ def state_callback(state):
     global print_state
     if print_stat: print(f'----------------Inside state_callback():----------------\n',
                          f'state.mode={state.mode}')
-    if state.mode == 'OFFBOARD':
+    if state.mode == 'GUIDED':
         guided_mode = True
-        if print_stat: print('OFFBOARD')
+        if print_stat: print('GUIDED')
         if print_flags and print_state: 
             print("state.mode == 'OFFBOARD' -> guided_mode = True")
             print_state = False
@@ -926,8 +926,9 @@ def dofeedbackcontrol():
                 forward_scan = True
             # print("Duration check = ", rospy.Time.now() - time_lastbox)
             if (rospy.Time.now() - time_lastbox < rospy.Duration(10)):
-                rcmsg.channels[7] = int(pitchcommand) #send pitch command on channel 8
-                rcmsg.channels[6] = int(yawcommand) #send yaw command on channel 7
+                #rcmsg.channels[7] = int(pitchcommand) #send pitch command on channel 8
+                #rcmsg.channels[6] = int(yawcommand) #send yaw command on channel 7
+                rcmsg.channels[9] = int(pitchcommand)
 
 
         # out of loop, send commands       
@@ -996,8 +997,9 @@ def dofeedbackcontrol():
             twistpub.publish(twistmsg)
 
             if EXECUTION == 'DEPLOYMENT':
-                rcmsg.channels[7] = int(pitchcommand) #send pitch command on channel 8
-                rcmsg.channels[6] = int(yawcommand) #send yaw command on channel 7
+                #rcmsg.channels[7] = int(pitchcommand) #send pitch command on channel 8
+                #rcmsg.channels[6] = int(yawcommand) #send yaw command on channel 7
+                rcmsg.channels[9] = int(pitchcommand)
                 rcpub.publish(rcmsg)
             else:
                 moveAirsimGimbal(pitchcommand, yawcommand)
@@ -1054,8 +1056,9 @@ def survey_flow():
         twistmsg.linear.z = 0
         twistmsg.angular.z = 0 # stop any turning
         twistpub.publish(twistmsg)
-        rcmsg.channels[7] = pitch_down #send pitch command on channel 8
-        rcmsg.channels[6] = yaw_center #send yaw command on channel 7
+        #rcmsg.channels[7] = pitch_down #send pitch command on channel 8
+        #rcmsg.channels[6] = yaw_center #send yaw command on channel 7
+        rcmsg.channels[9] = pitch_down
         rcpub.publish(rcmsg)
         
         t1 = gps_t
@@ -1088,8 +1091,9 @@ def survey_flow():
             if time.time()-t_log > 0.1: # do this at 10Hz at most
                 save_log() # makes sure data keeps being saved with GPS
                 t_log = time.time()
-                rcmsg.channels[7] = pitch_down #send pitch command on channel 8
-                rcmsg.channels[6] = yaw_center #send yaw command on channel 7
+                #rcmsg.channels[7] = pitch_down #send pitch command on channel 8
+                #rcmsg.channels[6] = yaw_center #send yaw command on channel 7
+                rcmsg.channels[9] = pitch_down
                 rcpub.publish(rcmsg)
                 rcpub.publish(rcmsg)
                 twistpub.publish(twistmsg)
@@ -1220,8 +1224,9 @@ def sample_heading_test(fspeed_head,hspeed_head):
     twistmsg.angular.z = 0 # z_angular
 
     if EXECUTION == 'DEPLOYMENT':
-        rcmsg.channels[7] = 1000 #send pitch command on channel 8
-        rcmsg.channels[6] = 1500 #send yaw command on channel 7
+        #rcmsg.channels[7] = 1000 #send pitch command on channel 8
+        #rcmsg.channels[6] = 1500 #send yaw command on channel 7
+        rcmsg.channels[9] = 1000
         rcpub.publish(rcmsg)
     else:
         moveAirsimGimbal(1000, 1500)
@@ -1319,8 +1324,9 @@ def sample_heading_test2(fspeed_flow, hspeed_flow):
 
 
     if EXECUTION == 'DEPLOYMENT':
-        rcmsg.channels[7] = 1000 #send pitch command on channel 8
-        rcmsg.channels[6] = 1500 #send yaw command on channel 7
+        #rcmsg.channels[7] = 1000 #send pitch command on channel 8
+        #rcmsg.channels[6] = 1500 #send yaw command on channel 7
+        rcmsg.channels[9] = 1000
         rcpub.publish(rcmsg)
     else:
         moveAirsimGimbal(1000, 1500)

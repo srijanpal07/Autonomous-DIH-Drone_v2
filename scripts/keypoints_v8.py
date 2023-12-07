@@ -48,15 +48,15 @@ device='cpu' # device='cuda:0'
 retina_masks=True
 
 save_txt = False
-save_img = False 
+save_img = True 
 save_crop = False 
 view_img = True
 hide_labels=False,  # hide labels
 hide_conf=False,  # hide confidences
 VIEW_IMG = True
-VIEW_MASK = False
+VIEW_MASK = True
 VIEW_POINTS = True
-SAVE_IMG = False
+SAVE_IMG = True
 save_format = False #'.avi' or '.raw'
 #-----------------------------------------------------#
 
@@ -104,6 +104,10 @@ font_color = BLACK
 font_thickness = 2
 
 
+def time_callback(gpstime):
+    global gps_t
+    gps_t = float(gpstime.time_ref.to_sec())
+
 
 def imagecallback(img):
     global pub,box,video,timelog
@@ -112,6 +116,18 @@ def imagecallback(img):
 
     # converting image to numpy array
     img_numpy = np.frombuffer(img.data,dtype=np.uint8).reshape(img.height,img.width,-1)
+    
+    if False:
+        result_ = img_numpy
+        scale_percent = 25 # percent of original size
+        width = int(result_.shape[1] * scale_percent / 100)
+        height = int(result_.shape[0] * scale_percent / 100)
+        dim = (width, height)
+        
+        # resize image
+        resized_ = cv2.resize(result_, dim, interpolation = cv2.INTER_AREA)
+        cv2.imshow('Keypoints',resized_)
+        cv2.waitKey(1)  # 1 millisecond
 
     if rospy.Time.now() - img.header.stamp > rospy.Duration(max_delay):
         print("KeypointNode: dropping old image from estimatimng keypoints\n")
@@ -164,12 +180,12 @@ def init_keypoints_node():
     global imgsz, model, device
     
     print('Initializing YOLOv8 pose model')
-    model= YOLO(YOLOv8_POSE_ROOT / 'yolov8x-pose-best.pt')
+    model= YOLO(YOLOv8_POSE_ROOT / 'keypoints-best.pt') #yolov8x-pose-best.pt
 
     # initializing video file
     if save_format=='.avi':
         codec = cv2.VideoWriter_fourcc('M','J','P','G')
-        video = cv2.VideoWriter(str(savedir.joinpath('Detection'+save_format)),
+        video = cv2.VideoWriter(str(savedir.joinpath('Keypoints'+save_format)),
             fourcc=codec,
             fps=20,
             frameSize = (640,480)) # this size is specific to GoPro
@@ -178,9 +194,14 @@ def init_keypoints_node():
     timelog = open(savedir.joinpath('Metadata.csv'),'w')
     timelog.write('FrameID,Timestamp_Jetson,Timestamp_GPS,Centroid_x,Centroid_y,Width,Height\n')
 
+
     # initializing node
     rospy.init_node('smoke_keypoints', anonymous=False)
-    rospy.Subscriber('front_centre_cam', Image, imagecallback)
+    if EXECUTION == 'SIMULATION':
+        rospy.Subscriber('front_centre_cam', Image, imagecallback)
+    if EXECUTION == 'DEPLOYMENT':
+        rospy.Subscriber('/camera/image', Image, imagecallback)
+        rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
     
     rospy.spin()
 
