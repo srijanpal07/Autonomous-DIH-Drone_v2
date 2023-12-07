@@ -23,7 +23,7 @@ OPT_FLOW_OFF = False
 #--------OPTION TO VIEW FLOW RESULTS IN REAL_TIME-------------#
 VIEW_IMG=True # also option to save image of output
 DRAW_FLOW = True
-SAVE_FLOW = False
+SAVE_FLOW = True
 DEBUG=False
 #-----------------------------------------------------#
 
@@ -64,14 +64,27 @@ if USE_RAFT:
     import torch
     import argparse
 
+
+EXECUTION = rospy.get_param('EXECUTION', default='DEPLOYMENT') # 'SIMULATION' or 'DEPLOYMENT'
+
+if EXECUTION == 'SIMULATION':
+    import airsim
+    from airsim_ros_pkgs.msg import GimbalAngleEulerCmd, GPSYaw
+
+
 gps_t = 0
 # create saving directory
 # username = os.getlogin( )
 tmp = datetime.datetime.now()
 stamp = ("%02d-%02d-%02d" % 
     (tmp.year, tmp.month, tmp.day))
-# maindir = Path('/home/%s/1FeedbackControl' % username)
-maindir = Path('./SavedData')
+
+if EXECUTION == 'SIMULATION':
+    maindir = Path('./SavedData')
+elif EXECUTION == 'DEPLOYMENT':
+    username = os.getlogin()
+    maindir = Path('/home/%s/1FeedbackControl' % username)
+
 runs_today = list(maindir.glob('*%s*_flow' % stamp))
 if runs_today:
     runs_today = [str(name) for name in runs_today]

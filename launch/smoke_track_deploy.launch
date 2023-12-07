@@ -10,6 +10,8 @@
 	
 	<node name="segmentation_node" pkg="autonomousdihdrone_v2" type="segment_v8.py" output="screen"/>
 
+	<node name="smoke_keypoints" pkg="autonomousdihdrone_v2" type="keypoints_v8.py" output="screen"/>
+
 	<node name="feedbackcontrol_node" pkg="autonomousdihdrone_v2" type="feedbackcontrolnode_sp_test.py" output="screen"/>
 
 	

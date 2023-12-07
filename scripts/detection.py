@@ -23,6 +23,10 @@ import torch
 EXECUTION = rospy.get_param('EXECUTION', default='DEPLOYMENT') # 'SIMULATION' or 'DEPLOYMENT'
 print(f"EXECUTION ==> {EXECUTION}")
 
+if EXECUTION == 'SIMULATION':
+    import airsim
+    from airsim_ros_pkgs.msg import GimbalAngleEulerCmd, GPSYaw
+
 # import torch_tensorrt
 print(f"Torch setup complete. Using torch {torch.__version__} ({torch.cuda.get_device_properties(0).name if torch.cuda.is_available() else 'CPU'})")
 
@@ -35,8 +39,8 @@ conf_thres=0.4  # confidence threshold
 iou_thres=0.45  # NMS IOU threshold
 
 VIEW_IMG=True
-SAVE_IMG = False # Originally False
-save_format = '.avi' # originally'.avi'
+SAVE_IMG = True # Originally False
+save_format = '.jpg' # originally'.avi'
 #-----------------------------------------------------#
 gps_t = 0
 # create saving directory
@@ -44,7 +48,13 @@ gps_t = 0
 tmp = datetime.datetime.now()
 stamp = ("%02d-%02d-%02d" % 
     (tmp.year, tmp.month, tmp.day))
-maindir = Path('./SavedData')
+
+if EXECUTION == 'SIMULATION':
+    maindir = Path('./SavedData')
+elif EXECUTION == 'DEPLOYMENT':
+    username = os.getlogin()
+    maindir = Path('/home/%s/1FeedbackControl' % username)
+
 runs_today = list(maindir.glob('*%s*_detection' % stamp))
 if runs_today:
     runs_today = [str(name) for name in runs_today]
@@ -95,14 +105,6 @@ def imagecallback(img):
     global pub,box,video,timelog
     global imgsz, model, device, names
     box = Detection2D()
-    # print(img.header.stamp)
-    # print('Time before running detection')
-    # print('Image %d' % img.header.seq)
-    # print(img.header.stamp)
-
-    # time_stamp = time.time()
-
-    # converting image to numpy array
     img_numpy = np.frombuffer(img.data,dtype=np.uint8).reshape(img.height,img.width,-1)
 
     if rospy.Time.now() - img.header.stamp > rospy.Duration(max_delay):
@@ -110,16 +112,10 @@ def imagecallback(img):
         # text_to_image = 'skipped'
         return
     else:
-        # print('DetectionNode: Running detection inference')
         t1 = time.time()
         object,img_numpy = detection(img_numpy,imgsz,model,device,names,savenum=img.header.seq)
-        # print('Detection function took',1e3*(time.time()-t1))
         
         t1 = time.time()
-        # print(img.header)
-        # print('Printing time stamps at exchange in detection')
-        # print(img.header.stamp)
-        # print("detected boxes = ",len(object))
         box.header.seq = img.header.seq
         box.header.stamp = img.header.stamp
         box.header.frame_id = ''
@@ -141,12 +137,6 @@ def imagecallback(img):
             box.bbox.size_y = -1
         pub.publish(box)
         text_to_image = 'processed'
-        # print('Time after running detection')
-        # print('Image %d' % box.source_img.header.seq)
-        # print(box.source_img.header.stamp)
-        
-        # end = time.time()
-        # print("finished callback for image", img.header.seq,"in",end-start, "seconds \n")
         img_numpy = cv2.putText(img_numpy,text_to_image,(10,30),font, font_size, font_color, font_thickness, cv2.LINE_AA)
 
         # adding to time stamp log, every frame
@@ -159,8 +149,7 @@ def imagecallback(img):
                                                 box.bbox.size_y))
     # viewing/saving images
     savenum=img.header.seq
-    
-    
+
     if SAVE_IMG:
         if save_format=='.raw':
             fid = open(savedir.joinpath('Detection-%06.0f.raw' % savenum),'wb')
@@ -170,9 +159,8 @@ def imagecallback(img):
             video.write(img_numpy)
         else:
             cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum),img_numpy))
+    
     if VIEW_IMG:
-        # im_with_boxes = annotator.result()
-        # cv2.imshow('Detection', img_numpy)
         result = img_numpy
         scale_percent = 25 # percent of original size
         width = int(result.shape[1] * scale_percent / 100)
@@ -183,9 +171,7 @@ def imagecallback(img):
         resized = cv2.resize(result, dim, interpolation = cv2.INTER_AREA)
         cv2.imshow('Detection',resized)
         cv2.waitKey(1)  # 1 millisecond
-    # print('Rest of callback function took',1e3*(time.time()-t1))
-    # print('Entire callback took',1e3*(time.time() - time_stamp))
-    # print('Detection fps ~',1/(time.time() - time_stamp))
+
 
 
 def init_detection_node():
@@ -212,10 +198,6 @@ def init_detection_node():
     model, device, names = detect_init(weights)
     # if engine:
     imgsz = [352,448] # scaled image size to run inference on
-    # else:
-    # imgsz = 640
-    # imgsz = [512,640]
-    # model(torch.zeros(3, 3, *imgsz).to(device).type_as(next(model.parameters())))  # run once
     
     # initializing video file
     if save_format=='.avi':
@@ -237,7 +219,6 @@ def init_detection_node():
         rospy.Subscriber('/camera/image', Image, imagecallback)
         rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
     
-    # rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
     
 
     rospy.spin()
@@ -333,13 +314,6 @@ def detection(img0,imgsz,model,device,names,savenum):
 
 ## methods from yolov5/detect_fun.py
 def detect_init(weights=YOLOv5_ROOT / 'yolov5s.pt'):
-    
-    #device = select_device(device='',batch_size=None)   # usually cpu or cuda
-    #w = str(weights[0] if isinstance(weights, list) else weights) # model weights, from .pt file
-    #model = torch.jit.load(w) if 'torchscript' in w else attempt_load(weights, map_location=device) # initializing model in torch
-    #model = torch.jit.load(w) if 'torchscript' in w else attempt_load(weights) # initializing model in torch
-    #names = model.module.names if hasattr(model, 'module') else model.names  # get class names
-    
 	# Load model
     # device='cuda:0'
     device='cpu'

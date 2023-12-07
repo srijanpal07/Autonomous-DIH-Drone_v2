@@ -24,6 +24,11 @@ from ultralytics import YOLO
 
 print(f"Torch setup complete. Using torch {torch.__version__} ({torch.cuda.get_device_properties(0).name if torch.cuda.is_available() else 'CPU'})")
 
+EXECUTION = rospy.get_param('EXECUTION', default='DEPLOYMENT') # 'SIMULATION' or 'DEPLOYMENT'
+
+if EXECUTION == 'SIMULATION':
+    import airsim
+    from airsim_ros_pkgs.msg import GimbalAngleEulerCmd, GPSYaw
 
 #global publisher and boundingbox
 global pub, box, video, timelog
@@ -48,13 +53,13 @@ device='cpu' # device='cuda:0'
 retina_masks=False
 
 save_txt = False
-save_img = False 
+save_img = True
 save_crop = False 
 hide_labels = False,  # hide labels
 hide_conf = False,  # hide confidences
 VIEW_IMG = True
 VIEW_MASK = False
-SAVE_IMG = False
+SAVE_IMG = True
 save_format = False #'.avi' or '.raw'
 #-----------------------------------------------------#
 
@@ -65,7 +70,13 @@ gps_t = 0
 tmp = datetime.datetime.now()
 stamp = ("%02d-%02d-%02d" % 
     (tmp.year, tmp.month, tmp.day))
-maindir = Path('./SavedData')
+
+if EXECUTION == 'SIMULATION':
+    maindir = Path('./SavedData')
+elif EXECUTION == 'DEPLOYMENT':
+    username = os.getlogin()
+    maindir = Path('/home/%s/1FeedbackControl' % username)
+    
 runs_today = list(maindir.glob('*%s*_segmentation' % stamp))
 if runs_today:
     runs_today = [str(name) for name in runs_today]
