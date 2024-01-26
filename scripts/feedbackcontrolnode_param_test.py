@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3.10
+#!/usr/local/bin/python3
 # license removed for brevity
 
 from ast import And
@@ -623,11 +623,11 @@ def move_to_set_alt_test():
     if abs(alt_diff) < 0.3:
         twistmsg.linear.z = 0
         print("Setpoint altitude reached!")
-    elif alt_diff < 1: # too low
+    elif alt_diff < 0.3: # too low
         twistmsg.linear.z = 0.5
         print(f'Too Low! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} |',
               f' current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}')
-    elif alt_diff > 1: # too high
+    elif alt_diff > 0.3: # too high
         twistmsg.linear.z = -0.5
         print(f'Too High! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} |',
               f' current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}')

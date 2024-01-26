@@ -165,8 +165,23 @@ def imagecallback(img):
                     box.bbox.center.x = source_y 
                     box.bbox.center.y = source_x
                 except:
+                    img_numpy_resize = img_numpy
                     box.bbox.center.x = -1
                     box.bbox.center.y = -1
+            
+            
+            # viewing/saving images
+            savenum=img.header.seq
+            
+            if SAVE_IMG:
+                    if save_format=='.raw':
+                            fid = open(savedir.joinpath('Detection-%06.0f.raw' % savenum),'wb')
+                            fid.write(img_numpy.flatten())
+                            fid.close()
+                    elif save_format == '.avi':
+                            video.write(img_numpy)
+                    else:
+                            cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum)),img_numpy_resize)
             
             print('Publishing Box', end='\r')
             pub.publish(box)

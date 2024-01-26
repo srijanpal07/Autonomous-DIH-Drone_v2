@@ -18,7 +18,7 @@ import re
 import numpy as np
 #--------OPTIONS-------------#
 VIEW_IMG = False
-save_image = True
+save_image = False
 save_format = '.avi'
 USE_DEWARPING=False # reduces fps if True
 #-----------------------------------------------------#
@@ -39,6 +39,8 @@ if runs_today:
     new_run_num = max(runs_today)+1
 else:
     new_run_num = 1
+
+
 savedir = maindir.joinpath('%s_run%02d_camera' % (stamp,new_run_num))
 os.makedirs(savedir)  
 
