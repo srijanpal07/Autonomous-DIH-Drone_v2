@@ -130,52 +130,39 @@ def time_callback(gpstime):
 def imagecallback(img):
     global pub,box,video,timelog
     global imgsz, model, device, names
+
     box = Detection2D()
+
     img_numpy = np.frombuffer(img.data,dtype=np.uint8).reshape(img.height,img.width,-1)
-    
-    # if True:
-    #     result_ = img_numpy
-    #     scale_percent = 25 # percent of original size
-    #     width = int(result_.shape[1] * scale_percent / 100)
-    #     height = int(result_.shape[0] * scale_percent / 100)
-    #     dim = (width, height)
-        
-    #     # resize image
-    #     resized_ = cv2.resize(result_, dim, interpolation = cv2.INTER_AREA)
-    #     cv2.imshow('Detection',resized_)
-    #     cv2.waitKey(1)  # 1 millisecond
 
     if rospy.Time.now() - img.header.stamp > rospy.Duration(max_delay):
         print("DetectionNode: dropping old image from detection\n")
-        # text_to_image = 'skipped'
         return
     else:
         t1 = time.time()
+        # Running Detection Inference
         object,img_numpy = detection(img_numpy,imgsz,model,device,names,savenum=img.header.seq)
-        
         t1 = time.time()
         box.header.seq = img.header.seq
         box.header.stamp = img.header.stamp
         box.header.frame_id = ''
-        # print(box.header.stamp)
         box.source_img = img
+
         if len(object) != 0 and object[0].confidence > conf_thres:
-            # print(object[0].bounding_box, object[0].confidence)
             box.bbox.center.x = object[0].bounding_box[0]
             box.bbox.center.y = object[0].bounding_box[1]
             box.bbox.center.theta = 0
             box.bbox.size_x = object[0].bounding_box[2]
             box.bbox.size_y = object[0].bounding_box[3]
         else:
-            # print("everything -1")
             box.bbox.center.x = -1
             box.bbox.center.y = -1
             box.bbox.center.theta = -1
             box.bbox.size_x = -1
             box.bbox.size_y = -1
+        
+        # Publishing Detection Box
         pub.publish(box)
-        text_to_image = 'processed'
-        img_numpy = cv2.putText(img_numpy,text_to_image,(10,30),font, font_size, font_color, font_thickness, cv2.LINE_AA)
 
         # adding to time stamp log, every frame
         timelog.write('%d,%f,%f,%f,%f,%f,%f\n' % (img.header.seq,
@@ -185,18 +172,19 @@ def imagecallback(img):
                                                 box.bbox.center.y,
                                                 box.bbox.size_x,
                                                 box.bbox.size_y))
+    
     # viewing/saving images
     savenum=img.header.seq
+    text_to_image = 'processed'
+    img_numpy = cv2.putText(img_numpy,text_to_image,(10,30),font, font_size, font_color, font_thickness, cv2.LINE_AA)
 
     if SAVE_IMG:
         if save_format=='.raw':
             fid = open(savedir.joinpath('Detection-%06.0f.raw' % savenum),'wb')
             fid.write(img_numpy.flatten())
             fid.close()
-        elif save_format == '.avi':
-            video.write(img_numpy)
-        else:
-            cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum)),img_numpy)
+        elif save_format == '.avi': video.write(img_numpy)
+        else: cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum)),img_numpy)
     
     if VIEW_IMG:
         result = img_numpy
@@ -204,9 +192,7 @@ def imagecallback(img):
         width = int(result.shape[1] * scale_percent / 100)
         height = int(result.shape[0] * scale_percent / 100)
         dim = (width, height)
-        
-        # resize image
-        resized = cv2.resize(result, dim, interpolation = cv2.INTER_AREA)
+        resized = cv2.resize(result, dim, interpolation = cv2.INTER_AREA) # resize image
         cv2.imshow('Detection',resized)
         cv2.waitKey(1)  # 1 millisecond
 
@@ -222,15 +208,13 @@ def init_detection_node():
     print('Initializing YOLO model')
     
     if target_name == 'smoke':
-        if engine:
+        if engine: 
             weights=YOLOv5_ROOT / 'smoke_BW_new_1-3-352-448.engine'
-        else:
-            weights=YOLOv5_ROOT / 'smoke.pt'
+        else: weights=YOLOv5_ROOT / 'smoke.pt'
     else:
-        if engine:
+        if engine: 
             weights=YOLOv5_ROOT / 'yolov5s_1-3-352-448.engine'
-        else:
-            weights=YOLOv5_ROOT / 'yolov5s.pt'
+        else: weights=YOLOv5_ROOT / 'yolov5s.pt'
     
     model, device, names = detect_init(weights)
 
@@ -262,25 +246,18 @@ def init_detection_node():
 
 
 def detection(img0,imgsz,model,device,names,savenum):
-    
-
     max_det=100  # maximum detections per image
-
     classes=None  # filter by class: --class 0, or --class 0 2 3
     agnostic_nms=False  # class-agnostic NMS
-
     stride = model.stride
     
     t1 = time.time()
     
-    # Padded resize
-    img = letterbox(img0, new_shape=imgsz,stride=stride, auto=True)[0]
-    # Convert
-    img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
-    # img = np.array((img,img,img)) # not sure why this was done
+    img = letterbox(img0, new_shape=imgsz,stride=stride, auto=True)[0] # Padded resize
+    img = img.transpose((2, 0, 1))[::-1]  # Convert HWC to CHW, BGR to RGB
     img = np.array([img])
     img = np.ascontiguousarray(img)
-    # imgsz = img.shape
+
     seen = 0
     imgsz = check_img_size(imgsz, s=stride)  # check image size
     
@@ -289,20 +266,15 @@ def detection(img0,imgsz,model,device,names,savenum):
     img = img / 255.0  # 0 - 255 to 0.0 - 1.0
     if len(img.shape) == 3:
         img = img[None]  # expand for batch dim
-    # print(img.shape)
-    # print('preprocessing took',(time.time()-t1)*1e3)
     
     t1 = time.time()
-    #pred = model(img, augment=augment, visualize=visualize)[0]
-    # replace above line with 
-    pred = model(img) # not sure if it needs [0]
-    # print('Inference took',1e3*(time.time()-t1))
-    #NMS
+    pred = model(img)
     t1 = time.time()
     pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
-    # pred = non_max_suppression(pred,conf_thres,iou_thres)
-    # print('NMS took',1e3*(time.time()-t1))
-    obj = [] # initializing output list
+
+    # initializing output list
+    obj = []
+
     # Process predictions
     t1 = time.time()
     for i, det in enumerate(pred):  # per image
@@ -314,19 +286,19 @@ def detection(img0,imgsz,model,device,names,savenum):
         if len(det):
             # Rescale boxes from img_size to im0 size
             det[:, :4] = scale_coords(img.shape[2:], det[:, :4], img0.shape).round()
+            
             # Write results
             for *xyxy, conf, cls in reversed(det):
-                # print(cls)
                 # extracting bounding box, confidence level, and name for each object
                 xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
                 confidence = float(conf)
                 object_class = names[int(cls)]
-                # print(object_class)
-                # if save_img or save_crop or view_img:  # Add bbox to image
+                
                 if VIEW_IMG:
                     c = int(cls)  # integer class
                     label = f'{names[c]} {conf:.2f}'
                     annotator.box_label(xyxy, label, color=colors(c, True))
+                
                 # adding object to list
                 obj.append(DetectedObject(np.array(xywh),confidence,object_class))
 
@@ -339,15 +311,12 @@ def detection(img0,imgsz,model,device,names,savenum):
         bestconf = 0
         for ob in obj:
             if ob.object_class == target_name and ob.confidence > bestconf:
-            # print("object class",ob.object_class)
-            # if ob.object_class == 'class0' and ob.confidence > bestconf: # tensorrt loses the names
                 bestobject = [ob]
                 bestconf = ob.confidence  
     else:
         bestobject = [ob]
         bestconf = ob.confidence
-    # print('Postprocessing took',1e3*(time.time()-t1))
-    # print(bestconf)
+
     return bestobject,im_with_boxes
 
 
@@ -355,19 +324,18 @@ def detection(img0,imgsz,model,device,names,savenum):
 # methods from yolov5/detect_fun.py
 def detect_init(weights=YOLOv5_ROOT / 'yolov5s.pt'):
 	# Load model
-    device='cuda:0'
-    #device='cpu'
+    device='cuda:0' # or device='cpu'
     device = select_device(device)
     
     if not engine:
         model = DetectMultiBackend(weights)    # first loads to cpu
-        if half:
-            model.half()    # then converts to half
+        if half: model.half()    # then converts to half
         model.to(device)    # then sends to GPU
     else:
         model = DetectMultiBackend(weights, device=device)
 
     stride, names, pt = model.stride, model.names, model.pt
+    
     return model, device, names
 
 
