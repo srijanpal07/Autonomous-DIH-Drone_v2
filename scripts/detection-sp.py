@@ -8,6 +8,7 @@ from rospy.client import init_node
 from sensor_msgs.msg import Image
 from vision_msgs.msg import Detection2D
 from sensor_msgs.msg import TimeReference
+from std_msgs.msg import Float64, String
 import numpy as np
 import cv2
 import os, re
@@ -47,13 +48,13 @@ max_delay = 0.5 # [seconds] delay between last detectiona and current image afte
 conf_thres = 0.4  # confidence threshold
 iou_thres = 0.45  # NMS IOU threshold
 
-VIEW_IMG=True
-SAVE_IMG = True # Originally False
+VIEW_IMG = False
+VIEW_DETECTION = False
+SAVE_IMG = False
+SAVE_DETECTION = True
 save_format = '.jpg' # originally'.avi'
 
 #------------------------OPTIONS SETUP------------------------#
-
-
 
 gps_t = 0
 
@@ -107,7 +108,9 @@ from utils.augmentations import letterbox
 
 
 #global publisher and boundingbox
-global pub,box, video, timelog
+global pub, box, video, timelog
+global smoketrack_status
+smoketrack_status = 'Initializing'
 #global initialized variables for detection model
 global imgsz, model, device, names
 
@@ -120,6 +123,12 @@ font_thickness = 2
 
 
 
+def smoketrack_status_callback(status):
+    global smoketrack_status
+    #print(f"Inside Callback : {status}")
+    smoketrack_status = status
+
+
 
 def time_callback(gpstime):
     global gps_t
@@ -130,6 +139,7 @@ def time_callback(gpstime):
 def imagecallback(img):
     global pub,box,video,timelog
     global imgsz, model, device, names
+    global smoketrack_status
 
     box = Detection2D()
 
@@ -138,7 +148,7 @@ def imagecallback(img):
     if rospy.Time.now() - img.header.stamp > rospy.Duration(max_delay):
         print("DetectionNode: dropping old image from detection\n")
         return
-    else:
+    elif smoketrack_status == 'Initializing':
         t1 = time.time()
         # Running Detection Inference
         object,img_numpy = detection(img_numpy,imgsz,model,device,names,savenum=img.header.seq)
@@ -154,6 +164,29 @@ def imagecallback(img):
             box.bbox.center.theta = 0
             box.bbox.size_x = object[0].bounding_box[2]
             box.bbox.size_y = object[0].bounding_box[3]
+
+            # viewing/saving images
+            savenum=img.header.seq
+            text_to_image = 'processed'
+            img_numpy = cv2.putText(img_numpy,text_to_image,(10,30),font, font_size, font_color, font_thickness, cv2.LINE_AA)
+
+            if SAVE_DETECTION:
+                if save_format=='.raw':
+                    fid = open(savedir.joinpath('Detection-%06.0f.raw' % savenum),'wb')
+                    fid.write(img_numpy.flatten())
+                    fid.close()
+                elif save_format == '.avi': video.write(img_numpy)
+                else: cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum)),img_numpy)
+            
+            if VIEW_DETECTION:
+                result = img_numpy
+                scale_percent = 30 # percent of original size
+                width = int(result.shape[1] * scale_percent / 100)
+                height = int(result.shape[0] * scale_percent / 100)
+                dim = (width, height)
+                resized = cv2.resize(result, dim, interpolation = cv2.INTER_AREA) # resize image
+                cv2.imshow('Detection Box',resized)
+                cv2.waitKey(1)  # 1 millisecond
         else:
             box.bbox.center.x = -1
             box.bbox.center.y = -1
@@ -172,34 +205,37 @@ def imagecallback(img):
                                                 box.bbox.center.y,
                                                 box.bbox.size_x,
                                                 box.bbox.size_y))
+        
+        # viewing/saving images
+        savenum=img.header.seq
+        text_to_image = 'cam img to det node'
+        img_numpy = cv2.putText(img_numpy,text_to_image,(10,30),font, font_size, font_color, font_thickness, cv2.LINE_AA)
+        
+        if SAVE_IMG:
+            if save_format=='.raw':
+                fid = open(savedir.joinpath('Detection-%06.0f.raw' % savenum),'wb')
+                fid.write(img_numpy.flatten())
+                fid.close()
+            elif save_format == '.avi': video.write(img_numpy)
+            else: cv2.imwrite(str(savedir.joinpath('Detection-img-%06.0f.jpg' % savenum)),img_numpy)
+            
+        if VIEW_IMG:
+            result = img_numpy
+            scale_percent = 30 # percent of original size
+            width = int(result.shape[1] * scale_percent / 100)
+            height = int(result.shape[0] * scale_percent / 100)
+            dim = (width, height)
+            resized = cv2.resize(result, dim, interpolation = cv2.INTER_AREA) # resize image
+            cv2.imshow('Cam Image to Detection Node',resized)
+            cv2.waitKey(1)  # 1 millisecond
+    else:
+        print("Not Running Detection!")
     
-    # viewing/saving images
-    savenum=img.header.seq
-    text_to_image = 'processed'
-    img_numpy = cv2.putText(img_numpy,text_to_image,(10,30),font, font_size, font_color, font_thickness, cv2.LINE_AA)
-
-    if SAVE_IMG:
-        if save_format=='.raw':
-            fid = open(savedir.joinpath('Detection-%06.0f.raw' % savenum),'wb')
-            fid.write(img_numpy.flatten())
-            fid.close()
-        elif save_format == '.avi': video.write(img_numpy)
-        else: cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum)),img_numpy)
-    
-    if VIEW_IMG:
-        result = img_numpy
-        scale_percent = 30 # percent of original size
-        width = int(result.shape[1] * scale_percent / 100)
-        height = int(result.shape[0] * scale_percent / 100)
-        dim = (width, height)
-        resized = cv2.resize(result, dim, interpolation = cv2.INTER_AREA) # resize image
-        cv2.imshow('Detection',resized)
-        cv2.waitKey(1)  # 1 millisecond
-
-
+        
 
 def init_detection_node():
     global pub,box,video,timelog
+    global smoketrack_status
     pub = rospy.Publisher('/bounding_box', Detection2D, queue_size=1)
     box = Detection2D()
 
@@ -234,12 +270,13 @@ def init_detection_node():
 
     # initializing node
     rospy.init_node('detection_node', anonymous=False)
+    rospy.Subscriber('/smoketrack_status', String, smoketrack_status_callback)
 
     if EXECUTION == 'SIMULATION':
         rospy.Subscriber('front_centre_cam', Image, imagecallback)
     if EXECUTION == 'DEPLOYMENT':
         rospy.Subscriber('/camera/image', Image, imagecallback)
-        rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
+        rospy.Subscriber('mavros/time_reference', TimeReference, time_callback)
 
     rospy.spin()
 
@@ -324,7 +361,7 @@ def detection(img0,imgsz,model,device,names,savenum):
 # methods from yolov5/detect_fun.py
 def detect_init(weights=YOLOv5_ROOT / 'yolov5s.pt'):
 	# Load model
-    device='cuda:0' # or device='cpu'
+    device='cpu' # or device='cpu' or 'cuda:0'
     device = select_device(device)
     
     if not engine:

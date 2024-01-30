@@ -27,7 +27,7 @@ def gimbal_control():
     rcmsg.channels = np.zeros(18,dtype=np.uint16).tolist()
     rcpub = rospy.Publisher('/mavros/rc/override', OverrideRCIn, queue_size=1)
     publish_rate = time.time()
-    rate = rospy.Rate(10) # originally 10hz
+    rate = rospy.Rate(20) # originally 10hz
 
     print('Inside Rospy shutdown')
     while not rospy.is_shutdown():
@@ -36,14 +36,20 @@ def gimbal_control():
         # print('Publishing')
         # rcpub.publish(rcmsg)
         print(f'time.time(): {int(time.time())}', end='\r')
-        if (int(time.time())%10 == 0):
-            rcmsg.channels[7] = int(1900) #90 down send pitch command on channel 8
-            rcmsg.channels[6] = int(1500) #send yaw command on channel 7
+        if (int(time.time())%4 == 0):
+            rcmsg.channels[9] = int(1000)
+            rcmsg.channels[8] = int(1000)
+            rcmsg.channels[7] = int(1000) #90 down send pitch command on channel 8
+            rcmsg.channels[6] = int(1000) #send yaw command on channel 7
+            rcmsg.channels[5] = int(1000)
             rcpub.publish(rcmsg)
             print('Down', end='\r')
         else:
-            rcmsg.channels[7] = int(1000) #Front send pitch command on channel 8
-            rcmsg.channels[6] = int(1500) #send yaw command on channel 7
+            rcmsg.channels[9] = int(1900)
+            rcmsg.channels[8] = int(1900)
+            rcmsg.channels[7] = int(1900) #Front send pitch command on channel 8
+            rcmsg.channels[6] = int(1900) #send yaw command on channel 7
+            rcmsg.channels[5] = int(1900)
             rcpub.publish(rcmsg)
             print('Up', end='\r')
             

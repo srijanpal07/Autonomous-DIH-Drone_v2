@@ -9,6 +9,7 @@ from sensor_msgs.msg import Image
 from vision_msgs.msg import Detection2D
 from sensor_msgs.msg import TimeReference
 from std_msgs.msg import String
+from std_msgs.msg import Float64
 import numpy as np
 import cv2
 import os, re
@@ -18,52 +19,52 @@ from pathlib import Path
 import time
 import torch
 from scipy.stats import linregress
-
 from ultralytics import YOLO
+
 
 print(f"Torch setup complete. Using torch {torch.__version__} ({torch.cuda.get_device_properties(0).name if torch.cuda.is_available() else 'CPU'})")
 
-EXECUTION = rospy.get_param('EXECUTION', default='DEPLOYMENT') # 'SIMULATION' or 'DEPLOYMENT'
 
+#------------------------EXECUTION SETUP------------------------#
+
+EXECUTION = rospy.get_param('EXECUTION', default='DEPLOYMENT') # 'SIMULATION' or 'DEPLOYMENT'
 if EXECUTION == 'SIMULATION':
     import airsim
     from airsim_ros_pkgs.msg import GimbalAngleEulerCmd, GPSYaw
 
+#------------------------EXECUTION SETUP------------------------#
+
+
 #global publisher and boundingbox
 global pub, box, video, timelog
+global smoketrack_status
+smoketrack_status = 'Initializing'
 
 #global initialized variables for segmentation model
 global imgsz, model, device, names, max_det, max_delay
-#global engine, half
 
 
 #------------------------OPTIONS---------------------#
-max_delay = 0.5 # [seconds] delay between last detection and current image after which to just drop images to catch up
+max_delay = 0.5       # [seconds] delay between last detection and current image after which to just drop images to catch up
+conf_thres = 0.25     # originally 0.4  # confidence threshold
+iou_thres = 0.45      # NMS IOU threshold
+max_det = 100         # maximum detections per image
+imgsz = (352,448)     # previously [352,448] # scaled image size to run inference on #inference size (height, width) 
+device = 'cuda:0'     # device='cuda:0' or device='cpu'
 
-conf_thres=0.25 # originally 0.4  # confidence threshold
-iou_thres=0.45  # NMS IOU threshold
-max_det=100 # maximum detections per image
-imgsz = (352,448) # previously [352,448] # scaled image size to run inference on #inference size (height, width) 
-device='cpu' # device='cuda:0'
-retina_masks=True
-
-save_txt = False
-save_img = True 
-save_crop = False 
-view_img = True
-hide_labels=False,  # hide labels
-hide_conf=False,  # hide confidences
-VIEW_IMG = True
-VIEW_MASK = True
-VIEW_POINTS = True
-SAVE_IMG = True
-save_format = False #'.avi' or '.raw'
+VIEW_IMG = False
+VIEW_KEYPOINTS = False
+SAVE_IMG = False
+SAVE_KEYPOINTS = True
+save_format = '.jpg' #'.avi' or '.raw'
 #-----------------------------------------------------#
 
 
 gps_t = 0
-# create saving directory
-# username = os.getlogin( )
+
+
+#------------------------SAVING DIRECTORY SETUP------------------------#
+
 tmp = datetime.datetime.now()
 stamp = ("%02d-%02d-%02d" % 
     (tmp.year, tmp.month, tmp.day))
@@ -74,17 +75,21 @@ elif EXECUTION == 'DEPLOYMENT':
     username = os.getlogin()
     maindir = Path('/home/%s/1FeedbackControl' % username)
     
-runs_today = list(maindir.glob('*%s*_keypoints' % stamp))
+runs_today = list(maindir.glob('%s/run*' % stamp))
+
 if runs_today:
     runs_today = [str(name) for name in runs_today]
     regex = 'run\d\d'
     runs_today=re.findall(regex,''.join(runs_today))
     runs_today = np.array([int(name[-2:]) for name in runs_today])
-    new_run_num = max(runs_today)+1
+    run_num = max(runs_today)
 else:
-    new_run_num = 1
-savedir = maindir.joinpath('%s_run%02d_keypoints' % (stamp,new_run_num))
+    run_num = 1
+
+savedir = maindir.joinpath('%s/run%02d/keypoints' % (stamp, run_num))
 os.makedirs(savedir)  
+
+#------------------------SAVING DIRECTORY SETUP------------------------#
 
 
 # YOLO paths and importing
@@ -104,100 +109,109 @@ font_color = BLACK
 font_thickness = 2
 
 
+
+def smoketrack_status_callback(status):
+    global smoketrack_status
+    print(f"Inside Callback : {str(status.data)}")
+    smoketrack_status = str(status.data)
+
+
+
 def time_callback(gpstime):
     global gps_t
     gps_t = float(gpstime.time_ref.to_sec())
 
 
+
 def imagecallback(img):
     global pub,box,video,timelog
+    global smoketrack_status
     global imgsz, model, device, names
+
     box = Detection2D()
 
     # converting image to numpy array
     img_numpy = np.frombuffer(img.data,dtype=np.uint8).reshape(img.height,img.width,-1)
     
-    if False:
-        result_ = img_numpy
+    if VIEW_IMG:
         scale_percent = 25 # percent of original size
-        width = int(result_.shape[1] * scale_percent / 100)
-        height = int(result_.shape[0] * scale_percent / 100)
+        width = int(img_numpy.shape[1] * scale_percent / 100)
+        height = int(img_numpy.shape[0] * scale_percent / 100)
         dim = (width, height)
-        
-        # resize image
-        resized_ = cv2.resize(result_, dim, interpolation = cv2.INTER_AREA)
-        cv2.imshow('Keypoints',resized_)
-        cv2.waitKey(1)  # 1 millisecond
+        img_numpy_resize = cv2.resize(img_numpy, dim, interpolation = cv2.INTER_AREA)  # resize image
+        cv2.imshow('Cam Img to Keypt Node', img_numpy_resize)
+        cv2.waitKey(1)
 
     if rospy.Time.now() - img.header.stamp > rospy.Duration(max_delay):
         print("KeypointNode: dropping old image from estimatimng keypoints\n")
         return
-    else:
+    elif smoketrack_status == 'Using Keypoints':
         results = model.predict(img_numpy, show=False, conf=conf_thres, imgsz=imgsz, iou=iou_thres, max_det=max_det, verbose=False)
         
         for result in results:
             keypoints = np.array(result.keypoints.data[0].cpu())
-            #print(f'Keypoints: {keypoints[0]}, {int(keypoints[0][1])}, {int(keypoints[0][0])}, img: {img_numpy.shape}')
+            
             if keypoints.all() is not None:
                 try:
                     source_x, source_y = int(keypoints[0][1]), int(keypoints[0][0])
-
-                    # wind_h, wind_w = 960, 540
-                    # cv2.namedWindow('Smoke Keypoints', cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
-                    # cv2.resizeWindow('Smoke Keypoints', wind_h, wind_w)
-                    img_numpy = cv2.circle(img_numpy, (source_y, source_x), 10, (255, 0, 0), -1)
-                    img_numpy = cv2.circle(img_numpy, (int(keypoints[1][0]), int(keypoints[1][1])), 10, (0, 255, 0), -1)
-                    img_numpy = cv2.circle(img_numpy, (int(keypoints[2][0]), int(keypoints[2][1])), 10, (0, 0, 255), -1)
-                    
-                    scale_percent = 25 # percent of original size
-                    width = int(img_numpy.shape[1] * scale_percent / 100)
-                    height = int(img_numpy.shape[0] * scale_percent / 100)
-                    dim = (width, height)
-                    # resize image
-                    img_numpy_resize = cv2.resize(img_numpy, dim, interpolation = cv2.INTER_AREA)
-                    
-                    cv2.imshow('Smoke Keypoints', img_numpy_resize)
-                    cv2.waitKey(1)
-                    
-                    #print(f'Source: {source_x}, {source_y}, img_shape: {img_numpy.shape}')
                     source_x, source_y = source_x/img_numpy.shape[0], source_y/img_numpy.shape[1]
-                    #print(f'Normalized Source: {source_x}, {source_y}, img_shape: {img_numpy.shape}')
                     box.bbox.center.x = source_y 
                     box.bbox.center.y = source_x
+                    
+                    if VIEW_KEYPOINTS:
+                        img_numpy = cv2.circle(img_numpy, (source_y, source_x), 10, (255, 0, 0), -1)
+                        img_numpy = cv2.circle(img_numpy, (int(keypoints[1][0]), int(keypoints[1][1])), 10, (0, 255, 0), -1)
+                        img_numpy = cv2.circle(img_numpy, (int(keypoints[2][0]), int(keypoints[2][1])), 10, (0, 0, 255), -1)
+                        scale_percent = 25 # percent of original size
+                        width = int(img_numpy.shape[1] * scale_percent / 100)
+                        height = int(img_numpy.shape[0] * scale_percent / 100)
+                        dim = (width, height)
+                        img_numpy_resize = cv2.resize(img_numpy, dim, interpolation = cv2.INTER_AREA)  # resize image
+                        cv2.imshow('Smoke Keypoints', img_numpy_resize)
+                        cv2.waitKey(1)
+
+                    if SAVE_KEYPOINTS:
+                        if save_format=='.raw':
+                                fid = open(savedir.joinpath('Keypoints-%06.0f.raw' % savenum),'wb')
+                                fid.write(img_numpy.flatten())
+                                fid.close()
+                        elif save_format == '.avi': video.write(img_numpy)
+                        else: cv2.imwrite(str(savedir.joinpath('Keypoints-%06.0f.jpg' % savenum)),img_numpy_resize)
                 except:
                     img_numpy_resize = img_numpy
                     box.bbox.center.x = -1
                     box.bbox.center.y = -1
+                    print("No Keypoints detected!")
             
             
             # viewing/saving images
             savenum=img.header.seq
             
             if SAVE_IMG:
-                    if save_format=='.raw':
-                            fid = open(savedir.joinpath('Detection-%06.0f.raw' % savenum),'wb')
-                            fid.write(img_numpy.flatten())
-                            fid.close()
-                    elif save_format == '.avi':
-                            video.write(img_numpy)
-                    else:
-                            cv2.imwrite(str(savedir.joinpath('Detection-%06.0f.jpg' % savenum)),img_numpy_resize)
-            
+                if save_format=='.raw':
+                        fid = open(savedir.joinpath('Keypoints-%06.0f.raw' % savenum),'wb')
+                        fid.write(img_numpy.flatten())
+                        fid.close()
+                elif save_format == '.avi': video.write(img_numpy)
+                else: cv2.imwrite(str(savedir.joinpath('Keypoints-img-%06.0f.jpg' % savenum)),img_numpy_resize)
+        
             print('Publishing Box', end='\r')
             pub.publish(box)
-        
+    else:
+        print("Not Running Keypoints!!")
+
 
 def init_keypoints_node():
     global pub, box, video, timelog
-    pub = rospy.Publisher('/keypoints', Detection2D, queue_size=1)
-    box = Detection2D()
-
     global imgsz, model, device
-    
-    print('Initializing YOLOv8 pose model')
+
+    # Initiliazing Publisher
+    pub = rospy.Publisher('/keypoints', Detection2D, queue_size=1)
+
+    print('Initializing YOLOv8 Keypoints model')
     model= YOLO(YOLOv8_POSE_ROOT / 'keypoints-best.pt') #yolov8x-pose-best.pt
 
-    # initializing video file
+    # Initializing video file
     if save_format=='.avi':
         codec = cv2.VideoWriter_fourcc('M','J','P','G')
         video = cv2.VideoWriter(str(savedir.joinpath('Keypoints'+save_format)),
@@ -205,13 +219,15 @@ def init_keypoints_node():
             fps=20,
             frameSize = (640,480)) # this size is specific to GoPro
 
-    # initializing timelog
+    # Initializing timelog
     timelog = open(savedir.joinpath('Metadata.csv'),'w')
     timelog.write('FrameID,Timestamp_Jetson,Timestamp_GPS,Centroid_x,Centroid_y,Width,Height\n')
 
-
-    # initializing node
+    # Initializing node
     rospy.init_node('smoke_keypoints', anonymous=False)
+    rospy.Subscriber('/smoketrack_status', String, smoketrack_status_callback)
+
+    # Subscribing to the camera image topic
     if EXECUTION == 'SIMULATION':
         rospy.Subscriber('front_centre_cam', Image, imagecallback)
     if EXECUTION == 'DEPLOYMENT':
@@ -219,7 +235,6 @@ def init_keypoints_node():
         rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
     
     rospy.spin()
-
 
 
 
