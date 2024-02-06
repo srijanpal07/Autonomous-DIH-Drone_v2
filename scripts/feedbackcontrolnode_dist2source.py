@@ -39,37 +39,8 @@ yaw_mode = True # Previously True # whether or not to yaw the entire drone durin
 forward_scan_option = True # Previously False changes to True this is primarily for smoke generator and grenade experiments, otherwise hybrid mode should work well over a more static plume
 fixed_heading_option = True # this mode tells the drone to sit above the smoke for a solid 5 seconds in order to get a heading from the mean flow direction, and then it goes to a fixed height and moves in that direction
 controlled_descent_option = True
-#----------------------- OPTIONS FOR MODES (Nate) -----------------------# 
+#----------------------- OPTIONS FOR MODES (Nate) -----------------------#
 
-
-
-# ---------------------------- Creating a saving directory ---------------------------- #
-# tmp = datetime.datetime.now()
-# stamp = ("%02d-%02d-%02d" % 
-#     (tmp.year, tmp.month, tmp.day))
-
-# if EXECUTION == 'SIMULATION':
-#     maindir = Path('./SavedData')
-# elif EXECUTION == 'DEPLOYMENT':
-#     username = os.getlogin()
-#     maindir = Path('/home/%s/1FeedbackControl' % username)
-    
-# runs_today = list(maindir.glob('%s/run*' % stamp))
-
-# if runs_today:
-#     runs_today = [str(name) for name in runs_today]
-#     regex = 'run\d\d'
-#     runs_today=re.findall(regex,''.join(runs_today))
-#     runs_today = np.array([int(name[-2:]) for name in runs_today])
-#     run_num = max(runs_today)
-# else:
-#     run_num = 1
-
-# savedir = maindir.joinpath('%s/run%02d/feedback' % (stamp, run_num))
-# os.makedirs(savedir)  
-# fid = open(savedir.joinpath('Feedbackdata.csv'),'w')
-# fid.write('Timestamp_Jetson,Timestamp_GPS,GPS_x,GPS_y,GPS_z,GPS_lat,GPS_long,GPS_alt_rel,Surveying,Sampling,MoveUp,AboveObject,Pitch,Size_error,OptFlow_On,Flow_x,Flow_y,Vspeed,Fspeed,Hspeed\n')
-# ---------------------------- Creating a saving directory ---------------------------- #
 
 
 
@@ -106,7 +77,6 @@ global proportional_gain
 #----------------------- Initialization (srijan) ----------------------------#
 smoke_dir = ''
 head, slope_deg = 0.0, 0.0
-global source_gps, drone_gps
 source_gps = [0.0, 0.0, 0.0] # lattitude, longitude and altitude
 drone_gps = [0.0, 0.0, 0.0] # lattitude, longitude and altitude
 time_lastbox = None
@@ -242,7 +212,7 @@ def euler_to_quaternion(roll, pitch, yaw):
 # checked ok
 def pose_callback(pose):
     global yaw, alt, gps_x, gps_y
-    
+
     q = pose.pose.orientation
     r,p,y = euler_from_quaternion(q.x,q.y,q.z,q.w)
     yaw = y
@@ -299,13 +269,12 @@ def gps_callback(gpsglobal):
     gps_long = gpsglobal.longitude
     gps_alt = gpsglobal.altitude
     drone_gps[0], drone_gps[1], drone_gps[2] = gps_lat, gps_long, gps_alt
-    
 
 
 # checked ok
 def rel_alt_callback(altrel):
-        global gps_alt_rel
-        gps_alt_rel = altrel.data # relative altitude just from GPS data
+    global gps_alt_rel
+    gps_alt_rel = altrel.data # relative altitude just from GPS data
 
 
 
@@ -492,9 +461,7 @@ def dofeedbackcontrol():
         # publishing
         twistpub.publish(twistmsg)
         publish_rate = time.time()
-        
-        # writing control states and data to csv
-        #save_log()
+
         
         rate.sleep()
         
@@ -651,17 +618,6 @@ def survey_flow():
 
 
 
-# NOT OK - not saving data
-def save_log():
-    """
-    writing data to csv
-    """
-    
-    fid.write('%f,%f,%f,%f,%f,%f,%f,%f,%s,%s,%s,%s,%f,%s,%f,%f,%f,%f,%f\n' % 
-        (time.time(),gps_t,gps_x,gps_y,alt,gps_lat,gps_long,gps_alt_rel,str(surveying),str(sampling),str(move_up),str(above_object),sizeerror_bbox,str(OPT_FLOW),flow_x,flow_y,vspeed,fspeed,hspeed))
-
-
-
 if __name__ == '__main__':
     
     print("Initializing feedback node...")
@@ -669,10 +625,8 @@ if __name__ == '__main__':
     
     #global EXECUTION
     print(f'Executing in ==> {EXECUTION}')
-    
+
     try:
         dofeedbackcontrol()
     except rospy.ROSInterruptException:
         pass
-
-
