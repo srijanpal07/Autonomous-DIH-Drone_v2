@@ -31,27 +31,6 @@ if EXECUTION == 'SIMULATION':
 
 
 
-#----------------------- OPTIONS FOR MODES (Nate) -----------------------#
-OPT_FLOW_MASTER = True # true means optical flow is used
-top_down_mode = False  # different operating mode for motion if the drone is far above the feature
-hybrid_mode = True # starts horizontal, moves toward object, then once above it, moves into the top-down-mode
-yaw_mode = True # Previously True # whether or not to yaw the entire drone during motion
-forward_scan_option = True # Previously False changes to True this is primarily for smoke generator and grenade experiments, otherwise hybrid mode should work well over a more static plume
-fixed_heading_option = True # this mode tells the drone to sit above the smoke for a solid 5 seconds in order to get a heading from the mean flow direction, and then it goes to a fixed height and moves in that direction
-controlled_descent_option = True
-#----------------------- OPTIONS FOR MODES (Nate) -----------------------#
-
-
-
-
-#----------------------- PRINT OPTIONS ----------------------------#
-print_pitch = False
-print_size_error = False
-print_mode = False
-print_vspeed = False
-print_yawrate = False
-print_flow=False
-print_alt = False
 #-----------------------(srijan)----------------------------#
 print_stat = False
 print_stat_test = True
@@ -91,7 +70,7 @@ proportional_gain = 8
 
 
 
-# ---------------------------------------------------- Deployment Parameters (Nate) ---------------------------------------------------- #
+# ----------------------- Deployment Parameters (Nate) ------------------------------- #
 # bounding box options
 setpoint_size = 0.9 #fraction of frame that should be filled by target. Largest axis (height or width) used.
 setpoint_size_approach = 1.5 # only relevant for hybrid mode, for getting close to target
@@ -159,6 +138,45 @@ publish_rate = 0
 
 
 
+# checked ok
+def moveAirsimGimbal(pitchcommand, yawcommand):
+    """
+    Converts gimbal's pwm commands to angles for running is simulation
+    pitchcommand - Pitch PWM. 1000 is straight ahead (0 deg) and 1900 is straight down (-90 deg) 
+    yawcommand - Yaw PWM. 1000 is -45 deg and 2000 is 45 deg
+    """
+    global gimbal, airsim_yaw, yaw
+    airsim_yaw = math.degrees(yaw)
+    if airsim_yaw<0:
+        airsim_yaw += 360
+    gimbal_pitch = (1000 - pitchcommand) / 10  
+    gimbal_yaw = ((yaw_center - yawcommand) * 45) / 500
+    cmd = GimbalAngleEulerCmd()
+    cmd.camera_name = "front_center"
+    cmd.vehicle_name = "PX4"
+    cmd.pitch = gimbal_pitch
+    cmd.yaw = gimbal_yaw - airsim_yaw + 90
+    if cmd.yaw>=360:
+        cmd.yaw = cmd.yaw % 360
+    gimbal.publish(cmd)
+
+
+
+# checked ok
+def offboard():
+    """
+    Used in Simulation to set 'OFFBOARD' mode 
+    so that it uses mavros commands for navigation
+    """
+    mode = SetModeRequest()
+    mode.base_mode = 0
+    mode.custom_mode = "OFFBOARD"
+    print("Setting up...", end ="->")
+    setm = rospy.ServiceProxy('/mavros/set_mode', SetMode)
+    resp = setm(mode)
+    print(resp)
+
+
 
 # checked ok
 def euler_from_quaternion(x, y, z, w):
@@ -211,14 +229,26 @@ def euler_to_quaternion(roll, pitch, yaw):
 
 # checked ok
 def pose_callback(pose):
+    """
+    x, y, z orientation of the drone
+    """
     global yaw, alt, gps_x, gps_y
 
     q = pose.pose.orientation
-    r,p,y = euler_from_quaternion(q.x,q.y,q.z,q.w)
+    _, _, y = euler_from_quaternion(q.x,q.y,q.z,q.w)
     yaw = y
     alt = pose.pose.position.z
     gps_x = pose.pose.position.x
     gps_y = pose.pose.position.y
+
+
+
+
+    """
+    Returns drone's heading with respect to North
+    """
+    global head
+    head = heading.data
 
 
 
@@ -229,6 +259,48 @@ def compass_hdg_callback(heading):
     """
     global head
     head = heading.data
+
+
+
+def heading_btw_points():
+    """
+    Calculates bearing between two coordinates (smoke source and instantaneous drone location)
+    https://mapscaping.com/how-to-calculate-bearing-between-two-coordinates/
+    """
+    global head, source_gps, drone_gps
+    drone_heading = head
+
+    # Format: point = (latitude_point, longitude_point)
+    point_A = (math.radians(source_gps[0]), math.radians(source_gps[1]))
+    point_B = (math.radians(drone_gps[0]), math.radians(drone_gps[1]))
+    sin, cos = math.sin, math.cos
+
+    # Formula : bearing  = math.atan2(math.sin(long2 - long1) * math.cos(lat2),
+    #                                   math.cos(lat1) * math.sin(lat2) - math.sin(lat1) *
+    #                                   math.cos(lat2) * math.cos(long2 - long1))
+    bearing_AB = math.atan2(sin(point_B[1] - point_A[1]) * cos(point_B[0]),
+                            cos(point_A[0]) * sin(point_B[0]) - sin(point_A[0]) *
+                            cos(point_B[0]) * cos(point_B[1] - point_A[1]))
+    
+    heading_AB = math.degrees(bearing_AB)
+    heading_AB = (heading_AB + 360) % 360
+    diff_head = heading_AB - drone_heading
+
+    if heading_AB > 270 and drone_heading < 90:
+        diff_head = diff_head - 360
+    elif heading_AB < 90 and drone_heading > 270:
+        diff_head = 360 + diff_head
+    else:
+        diff_head = diff_head
+
+    yaw_correction = diff_head
+    if print_stat:
+        print(f'heading btw source [{point_A[0]:.8f}',
+              f'{point_A[1]:.8f}] & drone[{point_B[0]:.8f}',
+              f'{point_B[1]:.8f}] : {heading_AB:.4f} deg |',
+              f'drone heading: {head} | Diff in heading: {diff_head:.2f}')
+
+    return yaw_correction
 
 
 
@@ -263,6 +335,11 @@ def time_callback(gpstime):
 
 # checked ok
 def gps_callback(gpsglobal):
+    """
+    returns gps loaction of the drone
+    gps_lat, gps_long, gps_alt and 
+    drone_gps = [gps_lat, gpa_long, gps_alt]
+    """
     global gps_lat, gps_long, gps_alt, drone_gps
 
     gps_lat = gpsglobal.latitude
@@ -271,8 +348,12 @@ def gps_callback(gpsglobal):
     drone_gps[0], drone_gps[1], drone_gps[2] = gps_lat, gps_long, gps_alt
 
 
+
 # checked ok
 def rel_alt_callback(altrel):
+    """
+    returns relative gps altitude
+    """
     global gps_alt_rel
     gps_alt_rel = altrel.data # relative altitude just from GPS data
 
@@ -280,6 +361,9 @@ def rel_alt_callback(altrel):
 
 # NOT OK - MOVE_ABOVE_OBJECT removed not sure waht it was doing
 def boundingbox_callback(box):
+    """
+    detection bounding box callback function
+    """
     global horizontalerror_bbox, verticalerror_bbox, sizeerror_bbox
     global time_lastbox
     global MOVE_ABOVE, OPT_FLOW
@@ -302,8 +386,64 @@ def boundingbox_callback(box):
 
 
 
+def segmentation_callback(box):
+    """
+    smoke segmentation callback function
+    """
+    global horizontalerror_smoketrack, verticalerror_smoketrack, sizeerror_smoketrack, horizontalerror_smoketrack_list
+    global time_lastbox_smoketrack, pitchcommand, yawcommand
+    global MOVE_ABOVE, OPT_FLOW
+    global kf, previous_yaw_measurements
+    global sampling
+    global yawing_using_kalman_filter
+    
+    # positive errors give right, up
+    if box.bbox.center.x != -1 and box.bbox.size_x > 2000:
+        if print_stat: 
+            if sampling: print("Sampling ... Yawing using Segmentation")
+        yawing_using_kalman_filter  = False    
+        time_lastbox_smoketrack = rospy.Time.now()
+        bboxsize = (box.bbox.size_x + box.bbox.size_y)/2 # take the average so that a very thin, long box will still be seen as small
+        
+        if not above_object: # different bbox size desired for approach and above stages for hybrid mode
+            if print_stat: print("Not above object ... ")
+            sizeerror_smoketrack = 0 # setpoint_size_approach - bboxsize # if box is smaller than setpoit, error is positive
+        else:
+            if print_stat: print("above_object was set to true previously")
+            sizeerror_smoketrack = 0 # setpoint_size - bboxsize # if box is smaller than setpoit, error is positive
+
+        if print_size_error: print('Setpoint - bbox (sizeerror) = %f' % sizeerror_smoketrack)
+
+        if not OPT_FLOW:
+            if print_stat: print("OPT_FLOW is set to False: Optical flow not running")   
+            horizontalerror_smoketrack = .5-box.bbox.center.x # if box center is on LHS of image, error is positive
+            verticalerror_smoketrack = .5-box.bbox.center.y # if box center is on upper half of image, error is positive 
+            
+            # Update the Kalman filter with the new measurement
+            update_kalman_filter(kf, horizontalerror_smoketrack)
+            previous_yaw_measurements.append(horizontalerror_smoketrack)
+            
+            if print_stat: print(f'Horzontal error: {round(horizontalerror_smoketrack, 5)}, Vertical error: {round(verticalerror, 5)}')
+
+        if pitchcommand < pitch_thresh and bboxsize > 0.75: # if close and gimbal pitched upward, move to get above the object
+            MOVE_ABOVE = True
+            if print_stat: print('Gimbal pitched upward moving above to get above object ... : MOVE_ABOVE is set to True')
+
+    else:
+        if print_stat: 
+            if sampling: print("Sampling ... Yawing using Kalman Filter")
+        horizontalerror_smoketrack = kf.x[0, 0]
+        yawing_using_kalman_filter  = True
+
+    return
+
+
+
 # checked ok
 def keypoint_callback(box):
+    """
+    smoke source keypoint callback
+    """
     global horizontalerror_keypoint, verticalerror_keypoint
     global time_lastbox_keypoint
     global MOVE_ABOVE, OPT_FLOW
@@ -323,6 +463,9 @@ def keypoint_callback(box):
 
 # NOT OK - if not ABOVE_OBJECT commented not not sure why
 def flow_callback(flow):
+    """
+    optical flow
+    """
     global horizontalerror_bbox, verticalerror_bbox, time_lastbox
     global flow_x,flow_y,flow_t
     global OPT_FLOW,OPT_COMPUTE_FLAG
@@ -350,6 +493,9 @@ def flow_callback(flow):
 
 
 def dofeedbackcontrol():
+    """
+    main feedback control loop
+    """
     # ----------------------------- Nate ----------------------------- #
     global above_object, forward_scan
     global yaw_mode,OPT_FLOW,OPT_COMPUTE_FLAG,MOVE_ABOVE
@@ -386,6 +532,7 @@ def dofeedbackcontrol():
     rospy.Subscriber('/bounding_box', Detection2D, boundingbox_callback)
     rospy.Subscriber('/flow', BoundingBox2D, flow_callback)
     rospy.Subscriber('/keypoints', Detection2D, keypoint_callback)
+    rospy.Subscriber('/segmentation_box', Detection2D, segmentation_callback)
     
     # Initialize Publishers
     twistpub = rospy.Publisher('/mavros/setpoint_velocity/cmd_vel_unstamped', Twist, queue_size=1)
@@ -619,13 +766,68 @@ def survey_flow():
 
 
 if __name__ == '__main__':
-    
+
     print("Initializing feedback node...")
     rospy.init_node('feedbackcontrol_node', anonymous=False)
+    twist_pub = rospy.Publisher('/mavros/setpoint_position/local', PoseStamped, queue_size=1)
     
     #global EXECUTION
     print(f'Executing in ==> {EXECUTION}')
+    if EXECUTION == 'SIMULATION':
+        # TAKEOFF
+        takeoff = CommandTOLRequest()
+        takeoff.min_pitch = 0
+        takeoff.yaw = 0
+        takeoff.latitude = 47.641468
+        takeoff.longitude = -122.140165
+        takeoff.altitude = -10
+        print("Taking off", end ="->")
+        fly = rospy.ServiceProxy('/mavros/cmd/takeoff', CommandTOL)
+        resp = fly(takeoff)
+        print(resp)
+        time.sleep(2)
 
+        # ARM the drone
+        arm = CommandBoolRequest()
+        arm.value = True
+        print("Arming - 1st attempt", end ="->")
+        arming = rospy.ServiceProxy('/mavros/cmd/arming', CommandBool)
+        resp = arming(arm)
+        print(resp)
+        time.sleep(5)
+        print("Arming - 2nd attempt", end ="->")
+        resp = arming(arm)
+        print(resp)
+        time.sleep(5)
+
+        # Move to set posiiton
+        print("Moving...")
+        go = PoseStamped()
+        go.pose.position.x = 0
+        go.pose.position.y = 0
+        go.pose.position.z = 20
+        go.pose.orientation.z = -0.8509035
+        go.pose.orientation.w = 0.525322
+        twist_pub.publish(go)
+        time.sleep(0.2)
+
+        print("GOING AUTONOMOUS")
+        offboard()
+        
+        # Start poition (X=-66495.023860,Y=49467.376329,Z=868.248719)
+        # Move to set posiiton
+        for i in range(150): # originally 150
+            go = PoseStamped()
+            go.pose.position.x = -17
+            go.pose.position.y = 10
+            go.pose.position.z = 220 # previuosly 250 with 55 fov of AirSim Camera
+            go.pose.orientation.z = 1
+            twist_pub.publish(go)
+            time.sleep(0.2)
+
+        #time.sleep(5)
+    
+    
     try:
         dofeedbackcontrol()
     except rospy.ROSInterruptException:
