@@ -48,7 +48,7 @@ max_delay = 0.5 # [seconds] delay between last detectiona and current image afte
 conf_thres = 0.4  # confidence threshold
 iou_thres = 0.45  # NMS IOU threshold
 
-VIEW_IMG = False
+VIEW_IMG = True
 VIEW_DETECTION = False
 SAVE_IMG = False
 SAVE_DETECTION = True
@@ -168,7 +168,7 @@ def imagecallback(img):
             # viewing/saving images
             savenum=img.header.seq
             text_to_image = 'processed'
-            img_numpy = cv2.putText(img_numpy,text_to_image,(10,30),font, font_size, font_color, font_thickness, cv2.LINE_AA)
+            # img_numpy = cv2.putText(img_numpy,text_to_image,(10,30),font, font_size, font_color, font_thickness, cv2.LINE_AA)
 
             if SAVE_DETECTION:
                 if save_format=='.raw':
@@ -209,7 +209,7 @@ def imagecallback(img):
         # viewing/saving images
         savenum=img.header.seq
         text_to_image = 'cam img to det node'
-        img_numpy = cv2.putText(img_numpy,text_to_image,(10,30),font, font_size, font_color, font_thickness, cv2.LINE_AA)
+        # img_numpy = cv2.putText(img_numpy,text_to_image,(10,30),font, font_size, font_color, font_thickness, cv2.LINE_AA)
         
         if SAVE_IMG:
             if save_format=='.raw':

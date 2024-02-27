@@ -25,6 +25,7 @@ from ultralytics import YOLO
 print(f"Torch setup complete. Using torch {torch.__version__} ({torch.cuda.get_device_properties(0).name if torch.cuda.is_available() else 'CPU'})")
 
 EXECUTION = rospy.get_param('EXECUTION', default='DEPLOYMENT') # 'SIMULATION' or 'DEPLOYMENT'
+print(f'EXECUTION ==> {EXECUTION}')
 
 if EXECUTION == 'SIMULATION':
     import airsim
@@ -58,8 +59,8 @@ save_crop = False
 hide_labels = False,  # hide labels
 hide_conf = False,  # hide confidences
 VIEW_IMG = True
-VIEW_MASK = False
-SAVE_IMG = True
+VIEW_MASK = True
+SAVE_IMG = False
 save_format = False #'.avi' or '.raw'
 #-----------------------------------------------------#
 
@@ -133,8 +134,9 @@ def imagecallback(img):
 
     # converting image to numpy array
     img_numpy = np.frombuffer(img.data,dtype=np.uint8).reshape(img.height,img.width,-1)
+    print('Got Numpy Image!')
     
-    if False:
+    if VIEW_IMG:
         result_ = img_numpy
         scale_percent = 25 # percent of original size
         width = int(result_.shape[1] * scale_percent / 100)
@@ -281,7 +283,7 @@ def init_detection_node():
     global imgsz, model, device
     
     print('Initializing YOLOv8 segmentation model')
-    model= YOLO(YOLOv5_ROOT / 'yolov8-best.pt') # model= YOLO(YOLOv5_ROOT / 'yolov8-best.pt')
+    model= YOLO(YOLOv5_ROOT / 'yolov8m-seg.pt') # model= YOLO(YOLOv5_ROOT / 'yolov8-best.pt')
 
     # initializing video file
     if save_format=='.avi':
@@ -301,6 +303,7 @@ def init_detection_node():
     if EXECUTION == 'SIMULATION':
         rospy.Subscriber('front_centre_cam', Image, imagecallback)
     if EXECUTION == 'DEPLOYMENT':
+        print('Subscribed')
         rospy.Subscriber('/camera/image', Image, imagecallback)
         rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
     
