@@ -12,7 +12,6 @@ from std_msgs.msg import Float64, String
 import numpy as np
 import cv2
 import os, re
-# import PySpin
 import sys, datetime
 import argparse
 from pathlib import Path
@@ -25,12 +24,12 @@ from ultralytics import YOLO
 print(f"Torch setup complete. Using torch {torch.__version__} ({torch.cuda.get_device_properties(0).name if torch.cuda.is_available() else 'CPU'})")
 
 
-#global publisher and boundingbox
+# global publisher and boundingbox
 global pub, box, video, timelog
 
-#global initialized variables for segmentation model
+# global initialized variables for segmentation model
 global imgsz, model, device, names, max_det, max_delay
-#global engine, half
+# global engine, half
 
 global threshold, reduced_threshold
 threshold = 240 # white smoke
@@ -38,24 +37,19 @@ global sampling_time_passed
 sampling_time_passed = 0 
 
 #------------------------OPTIONS---------------------#
-max_delay = 0.5 # [seconds] delay between last detection and current image after which to just drop images to catch up
+max_delay = 0.5        # [seconds] delay between last detection and current image after which to just drop images to catch up
+conf_thres = 0.25      # previously 0.25  # confidence threshold
+iou_thres = 0.6        # previously 0.7 # NMS IOU threshold
+max_det = 100          # maximum detections per image
+imgsz = (192,224)      # previously [352,448] # scaled image size to run inference on #inference size (height, width) 
+device = 'cuda:0'      # device = 'cuda:0' or 'cpu'
+retina_masks = False
 
-conf_thres = 0.25 #previously 0.25  # confidence threshold
-iou_thres = 0.6  # previously 0.7 # NMS IOU threshold
-max_det = 100 # maximum detections per image
-imgsz = (192,224) # previously [352,448] # scaled image size to run inference on #inference size (height, width) 
-device='cpu' # device='cuda:0'
-retina_masks=False
 
-save_txt = False
-save_img = False 
-save_crop = False 
-hide_labels = False,  # hide labels
-hide_conf = False,  # hide confidences
 VIEW_IMG = True
 VIEW_MASK = False
 SAVE_IMG = False
-save_format = False #'.avi' or '.raw'
+SAVE_FORMAT = False    # '.avi' or '.raw'
 #-----------------------------------------------------#
 
 
@@ -88,13 +82,6 @@ if str(YOLOv5_ROOT) not in sys.path:
 YOLOv5_ROOT = Path(os.path.relpath(YOLOv5_ROOT, Path.cwd()))  # relative
 
 
-# labeling text on image
-BLACK = (265,265,265)
-font = cv2.FONT_HERSHEY_SIMPLEX
-font_size = 1
-font_color = BLACK
-font_thickness = 2
-
 
 def time_info_callback(data):
     global threshold, sampling_time_passed
@@ -105,6 +92,7 @@ def time_info_callback(data):
         if sampling_time_passed % 2 == 0:
             threshold = threshold - 1
     print(f"Received timestamp: {sampling_time_passed} secs ------- threshold reduced to : threshold: {threshold}")
+
 
 
 def imagecallback(img):
@@ -119,10 +107,8 @@ def imagecallback(img):
         #print("DetectionNode: dropping old image from detection\n")
         return
     else:
-        #results = model.predict(img_numpy, show=True, conf=conf_thres, imgsz=imgsz, iou=iou_thres, max_det=max_det, verbose=False, show_conf=False, retina_masks=False)
         results = model.predict(img_numpy, imgsz=imgsz, verbose=False, show_conf=True, half=True)
-        #results = non_max_suppression(results, conf_thres=conf_thres, iou_thres=iou_thres, classes=None, agnostic=False, max_det=max_det, max_wh=1000)
-
+        
         if results[0].masks is not None:
             # resizing the original image to the size of mask
             resize_orig_img = cv2.resize(results[0].orig_img, (len(results[0].masks.data[0][0]), len(results[0].masks.data[0]))) 
@@ -131,7 +117,6 @@ def imagecallback(img):
             x_mean, y_mean = -1, -1
             for i in range(len(results[0].masks.data)):
                 indices = find_element_indices(results[0].masks.data[0].cpu().numpy(), 1) # a pixel belonging to a segmented class is having a value of 1, rest 0
-                #indices = find_element_indices(results[0].masks.data[0].numpy(), 1)
 
                 # putting a threshold to the segmented region to detect the denser part of the smoke and finding the centroid of the denser region
                 white_x_mean, white_y_mean, white_pixel_indices = check_white_pixels(indices, resize_orig_img)
@@ -175,14 +160,13 @@ def imagecallback(img):
                     y_mean = int(y_mean_norm * annotated_frame.shape[1])
                     annotated_frame = cv2.circle(annotated_frame, (y_mean, x_mean), 10, (255, 0, 0), -1)
 
-                    #wind_h, wind_w = 960, 540 # (192,224)
+                    # wind_h, wind_w = 960, 540 # (192,224)
                     scale_percent = 25 # percent of original size
                     width = int(annotated_frame.shape[1] * scale_percent / 100)
                     height = int(annotated_frame.shape[0] * scale_percent / 100)
                     dim = (width, height)
                     annotated_frame = cv2.resize(annotated_frame, dim, interpolation = cv2.INTER_AREA)
                     cv2.namedWindow('Smoke Segmentation', cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
-                    #cv2.resizeWindow('Smoke Segmentation', wind_h, wind_w)
                     cv2.imshow('Smoke Segmentation', annotated_frame)
                     cv2.waitKey(1)
 
@@ -196,10 +180,7 @@ def imagecallback(img):
                 box.bbox.center.theta = 0
                 box.bbox.size_x = white_pixel_count
                 pub.publish(box)
-                
-                #print(f'No of white pixels: {white_pixel_count}', end='\r')
-                text_to_image = 'processed'
-                img_numpy = cv2.putText(img_numpy,text_to_image,(10,30),font, font_size, font_color, font_thickness, cv2.LINE_AA)
+
 
                 # adding to time stamp log, every frame
                 timelog.write('%d,%f,%f,%f,%f, %f, %f\n' % (img.header.seq,
@@ -224,11 +205,11 @@ def imagecallback(img):
         savenum=img.header.seq
 
         if SAVE_IMG:
-            if save_format=='.raw':
+            if SAVE_FORMAT =='.raw':
                 fid = open(savedir.joinpath('Segmentation-%06.0f.raw' % savenum),'wb')
                 fid.write(img_numpy.flatten())
                 fid.close()
-            elif save_format == '.avi':
+            elif SAVE_FORMAT == '.avi':
                 video.write(img_numpy)
             else:
                 cv2.imwrite(str(savedir.joinpath('Segmentation-%06.0f.jpg' % savenum),img_numpy))
@@ -246,9 +227,9 @@ def init_detection_node():
     model= YOLO(YOLOv5_ROOT / 'yolov8s-best.pt') # model= YOLO(YOLOv5_ROOT / 'yolov8s-best.pt') # model= YOLO(YOLOv5_ROOT / 'yolov8-best.pt')
 
     # initializing video file
-    if save_format=='.avi':
+    if SAVE_FORMAT =='.avi':
         codec = cv2.VideoWriter_fourcc('M','J','P','G')
-        video = cv2.VideoWriter(str(savedir.joinpath('Detection'+save_format)),
+        video = cv2.VideoWriter(str(savedir.joinpath('Detection' + SAVE_FORMAT)),
             fourcc=codec,
             fps=20,
             frameSize = (640,480)) # this size is specific to GoPro
@@ -309,7 +290,6 @@ def check_white_pixels(mask_indices, img):
         x_mean = -1
         y_mean = -1
 
-    #print(f'Len of mask_indices: {len(mask_indices)}, Len of white_pixel_indices: {len(white_pixel_indices)}', end='\r')
     if VIEW_IMG:
         img = cv2.circle(img, (y_mean, x_mean), 3, (255, 0, 0), -1)
         cv2.imshow('Processed Image', img)
