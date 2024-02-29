@@ -46,14 +46,15 @@ VIEW_IMG = False
 VIEW_SEGMENTATION = False
 VIEW_MASK = False
 VIEW_THRESHOLD_SEGMENT = False
-SAVE_SEGMENTATION = False
+SAVE_SEGMENTATION = True
 SAVE_FORMAT = False     # '.avi' or '.raw'
-PRINT_TIME = True
+PRINT_TIME = False
+PRINT_SEG_DATA = True
 # --------------------------- OPTIONS -------------------------- #
 
 
 
-# ------------------------ HYPERPARAMETERS --------------------- #
+# ------------------------ YOLO PARAMETERS --------------------- #
 MAX_DELAY = 0.5        # [seconds] delay between last detection and current image after which to just drop images to catch up
 CONF_THRES = 0.25      # previously 0.25  # confidence threshold
 IOU_THRES = 0.6        # previously 0.7 # NMS IOU threshold
@@ -63,7 +64,7 @@ DEVICE = 'cuda:0'      # DEVICE = 'cuda:0' or 'cpu'
 RETINA_MASKS = False
 HALF_PRECISION = True
 SHOW_CONF = True
-# ------------------------ HYPERPARAMETERS --------------------- #
+# ------------------------ YOLO PARAMETERS --------------------- #
 
 
 
@@ -176,6 +177,7 @@ def imagecallback(img):
                 box.bbox.size_x = -1
                 box.bbox.size_y = -1
                 pub.publish(box)
+                t2, t1 = 0, 0 
             else:
                 # selecting the instance which has the maximum number of segmented white pixels
                 img_mask = results[0].masks.data[data_idx].cpu().numpy()
@@ -214,6 +216,7 @@ def imagecallback(img):
                     x_mean = int(x_mean_norm * annotated_frame.shape[0])
                     y_mean = int(y_mean_norm * annotated_frame.shape[1])
                     annotated_frame = cv2.circle(annotated_frame, (y_mean, x_mean), 10, (255, 0, 0), -1)
+                    saving_stamp = (f"{tmp.month:02.0f}{tmp.day:02.0f}{tmp.year:04.0f}")
                     
                     if SAVE_FORMAT =='.raw':
                         fid = open(savedir.joinpath('Segmentation-%06.0f.raw' % savenum),'wb')
@@ -222,7 +225,7 @@ def imagecallback(img):
                     elif SAVE_FORMAT == '.avi':
                         video.write(annotated_frame)
                     else:
-                        cv2.imwrite(str(savedir.joinpath('Segmentation-%06.0f.jpg' % savenum)),annotated_frame)
+                        cv2.imwrite(str(savedir.joinpath(f'Segment-{saving_stamp}-{savenum:6.0f}.jpg')),annotated_frame)
 
                 box.header.seq = img.header.seq
                 box.header.stamp = img.header.stamp
@@ -235,19 +238,8 @@ def imagecallback(img):
                 box.bbox.size_x = white_pixel_count
                 pub.publish(box)
 
-                if PRINT_TIME:
-                    t2 = time.time()
-                    print(f"Time taken from receiving to publishing: {(t2-t1)}")
-
-                # adding to time stamp log, every frame
-                timelog.write('%d,%f,%f,%f,%f, %f, %f\n' % (img.header.seq,
-                                                        float(img.header.stamp.to_sec()),
-                                                        gps_t,
-                                                        box.bbox.center.x,
-                                                        box.bbox.center.y, 
-                                                        box.bbox.center.theta,
-                                                        box.bbox.size_x
-                                                        ))
+                t2 = time.time()
+                if PRINT_TIME: print(f"Time taken from receiving to publishing: {(t2-t1)}")
 
         else:
             # No segmnetation data received
@@ -257,6 +249,13 @@ def imagecallback(img):
             box.bbox.size_x = -1
             box.bbox.size_y = -1
             pub.publish(box)
+            t2, t1 = 0, 0
+
+        # adding to time stamp log, every frame
+        timelog.write(f'{img.header.seq},{float(img.header.stamp.to_sec())},{gps_t},{box.bbox.center.x},{box.bbox.center.y},{box.bbox.center.theta},{box.bbox.size_x}\n')
+
+        if PRINT_SEG_DATA:
+            print(f'Segment center: ({box.bbox.center.x: .2f}, {box.bbox.center.y: .2f}) | Inference time: {(t2-t1): .4f} | Area of segment: {box.bbox.size_x}', end='\r')
 
 
 
