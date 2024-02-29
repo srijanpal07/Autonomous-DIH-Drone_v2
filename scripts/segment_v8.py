@@ -42,12 +42,13 @@ sampling_time_passed = 0
 
 # --------------------------- OPTIONS -------------------------- #
 DYNAMIC_THRESHOLDING = False
-VIEW_IMG = True
-VIEW_SEGMENTATION = True
+VIEW_IMG = False
+VIEW_SEGMENTATION = False
 VIEW_MASK = False
 VIEW_THRESHOLD_SEGMENT = False
-SAVE_IMG = False
+SAVE_SEGMENTATION = False
 SAVE_FORMAT = False     # '.avi' or '.raw'
+PRINT_TIME = True
 # --------------------------- OPTIONS -------------------------- #
 
 
@@ -66,14 +67,9 @@ SHOW_CONF = True
 
 
 
-
-
-
-
-
 gps_t = 0
 # create saving directory
-# username = os.getlogin( )
+username = os.getlogin( )
 tmp = datetime.datetime.now()
 stamp = ("%02d-%02d-%02d" % 
     (tmp.year, tmp.month, tmp.day))
@@ -130,8 +126,8 @@ def imagecallback(img):
     global MODEL
 
     # converting image to numpy array
+    t1 = time.time()
     img_numpy = np.frombuffer(img.data,dtype=np.uint8).reshape(img.height,img.width,-1)
-    
     # print(img_numpy.shape) # (480,640,3)
     
     if VIEW_IMG:
@@ -142,7 +138,7 @@ def imagecallback(img):
         cv2.waitKey(1)
 
     if rospy.Time.now() - img.header.stamp > rospy.Duration(MAX_DELAY):
-        print("Segmentation Node: dropping old image from segmentation\n")
+        # print("Segmentation Node: dropping old image from segmentation\n")
         return
     else:
         results = MODEL.predict(img_numpy, conf=CONF_THRES, iou=IOU_THRES, 
@@ -171,7 +167,7 @@ def imagecallback(img):
                     max_white_pixels = white_pixel_count
                     data_idx = i
                     x_mean, y_mean = white_x_mean, white_y_mean
-            
+
             if x_mean == -1 and y_mean == -1:
                 # No segmnetation data received
                 box.bbox.center.x = -1
@@ -186,7 +182,7 @@ def imagecallback(img):
                 img_mask = (img_mask * 255).astype("uint8")
                 indices = find_element_indices(img_mask, 255)
                 img_mask = cv2.cvtColor(img_mask, cv2.COLOR_GRAY2BGR)
-  
+
                 # centroid of smoke normalized to the size of the mask
                 x_mean_norm = x_mean / img_mask.shape[0]
                 y_mean_norm = y_mean / img_mask.shape[1]
@@ -197,7 +193,8 @@ def imagecallback(img):
                     img_mask = cv2.resize(img_mask, dim, interpolation = cv2.INTER_AREA)
                     cv2.imshow('Segmentation Mask', img_mask)
                     cv2.waitKey(1)
-                
+
+
                 if VIEW_SEGMENTATION:
                     # result is a <class 'list'> in which the first element is <class 'ultralytics.engine.results.Results'>
                     annotated_frame = results[0].plot() 
@@ -206,9 +203,26 @@ def imagecallback(img):
                     y_mean = int(y_mean_norm * annotated_frame.shape[1])
                     annotated_frame = cv2.circle(annotated_frame, (y_mean, x_mean), 10, (255, 0, 0), -1)
                     dim = IMGSZ
-                    annotated_frame = cv2.resize(annotated_frame, dim, interpolation = cv2.INTER_AREA)
-                    cv2.imshow('Segmentation Window', annotated_frame)
+                    annotated_frame_view = cv2.resize(annotated_frame, dim, interpolation = cv2.INTER_AREA)
+                    cv2.imshow('Segmentation Window', annotated_frame_view)
                     cv2.waitKey(1)
+
+
+                if SAVE_SEGMENTATION:
+                    savenum=img.header.seq
+                    annotated_frame = results[0].plot()
+                    x_mean = int(x_mean_norm * annotated_frame.shape[0])
+                    y_mean = int(y_mean_norm * annotated_frame.shape[1])
+                    annotated_frame = cv2.circle(annotated_frame, (y_mean, x_mean), 10, (255, 0, 0), -1)
+                    
+                    if SAVE_FORMAT =='.raw':
+                        fid = open(savedir.joinpath('Segmentation-%06.0f.raw' % savenum),'wb')
+                        fid.write(annotated_frame.flatten())
+                        fid.close()
+                    elif SAVE_FORMAT == '.avi':
+                        video.write(annotated_frame)
+                    else:
+                        cv2.imwrite(str(savedir.joinpath('Segmentation-%06.0f.jpg' % savenum)),annotated_frame)
 
                 box.header.seq = img.header.seq
                 box.header.stamp = img.header.stamp
@@ -221,6 +235,10 @@ def imagecallback(img):
                 box.bbox.size_x = white_pixel_count
                 pub.publish(box)
 
+                if PRINT_TIME:
+                    t2 = time.time()
+                    print(f"Time taken from receiving to publishing: {(t2-t1)}")
+
                 # adding to time stamp log, every frame
                 timelog.write('%d,%f,%f,%f,%f, %f, %f\n' % (img.header.seq,
                                                         float(img.header.stamp.to_sec()),
@@ -230,7 +248,7 @@ def imagecallback(img):
                                                         box.bbox.center.theta,
                                                         box.bbox.size_x
                                                         ))
-            
+
         else:
             # No segmnetation data received
             box.bbox.center.x = -1
@@ -240,20 +258,7 @@ def imagecallback(img):
             box.bbox.size_y = -1
             pub.publish(box)
 
-        # viewing/saving images
-        savenum=img.header.seq
 
-        if SAVE_IMG:
-            if SAVE_FORMAT =='.raw':
-                fid = open(savedir.joinpath('Segmentation-%06.0f.raw' % savenum),'wb')
-                fid.write(img_numpy.flatten())
-                fid.close()
-            elif SAVE_FORMAT == '.avi':
-                video.write(img_numpy)
-            else:
-                cv2.imwrite(str(savedir.joinpath('Segmentation-%06.0f.jpg' % savenum)),img_numpy)
-        
-        
 
 def init_detection_node():
     global pub, box, video, timelog
