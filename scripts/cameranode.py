@@ -18,10 +18,10 @@ import numpy as np
 
 
 #--------OPTIONS-------------#
-VIEW_IMG = True
-SAVE_IMAGE = True
+VIEW_IMG = False
+SAVE_IMAGE = False
 SAVE_FORMAT = '.avi'
-USE_DEWARPING = True # reduces fps if True
+USE_DEWARPING = False # reduces fps if True
 #----------------------------#
 
 
