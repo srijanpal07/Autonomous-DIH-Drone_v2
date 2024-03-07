@@ -139,7 +139,7 @@ def publishimages(cam,camlist):
 
 
             except Exception as e:       
-                print('Error: %s' % e)
+                print(f'Error: {e}')
 
 
         cam.EndAcquisition()
