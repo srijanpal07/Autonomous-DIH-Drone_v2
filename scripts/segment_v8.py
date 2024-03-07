@@ -264,7 +264,7 @@ def init_segmentation_node():
     box = Detection2D()
 
     print('Initializing YOLOv8 segmentation model')
-    MODEL = YOLO(YOLOv8_SEG_ROOT / 'yolov8n-seg.pt')
+    MODEL = YOLO(YOLOv8_SEG_ROOT / 'realsmoke_seg-best.pt')
 
     # initializing video file
     if SAVE_FORMAT =='.avi':
