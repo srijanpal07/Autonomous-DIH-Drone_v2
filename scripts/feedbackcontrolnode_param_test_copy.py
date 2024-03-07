@@ -561,7 +561,6 @@ def dofeedbackcontrol():
 
     while not rospy.is_shutdown():
         if guided_mode:
-        #rise_up()
             if test_speed:
                 speed_test()
             if test_move_to_alt:
@@ -625,22 +624,6 @@ def move_to_set_alt_test():
         print("Setpoint altitude reached!")
     else:
     	twistmsg.linear.z = (-0.1)*alt_diff
-
-    if alt_diff > 0: 
-        print(f'High! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} | current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}')
-    if alt_diff < 0: 
-        print(f'Low! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} | current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}')
-
-        # if alt_diff > 0: print(f'Low! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} | current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}')
-        # elif alt_diff < 0.3: # too low
-        #     twistmsg.linear.z = 0.5
-        #     print(f'Low! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} |',
-        #         f' current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}')
-        # elif alt_diff > 0.3: # too high
-        #     twistmsg.linear.z = -0.5
-        #     print(f'High! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} |',
-        #         f' current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}')
-
     twistpub.publish(twistmsg)
     time.sleep(0.2)
 
@@ -683,27 +666,6 @@ def yaw_to_dir_test(h_surv, f_surv):
     twistmsg.angular.z = 0
     twistpub.publish(twistmsg)
 
-
-
-def rise_up(dz = 5,vz=3):
-    """
-    simple loop to go up or down, usually to get above object
-    """
-    global twistpub, twistmsg
-
-    if print_stat:
-        print(f'Rising {dz}m at {vz}m/s...')
-    twistmsg.linear.x = 0
-    twistmsg.linear.y = 0
-    twistmsg.linear.z = vz
-
-    for idx in range(int((dz/vz)/0.2)):
-        twistpub.publish(twistmsg)
-        time.sleep(0.2)
-
-    twistmsg.linear.z = 0
-    twistpub.publish(twistmsg)
-    return
 
 
 

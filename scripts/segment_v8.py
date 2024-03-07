@@ -32,21 +32,18 @@ if EXECUTION == 'SIMULATION':
 global pub, box, video, timelog
 
 # Initializing Threshold to detect the densest part of the smoke
-global threshold
-threshold = 240
+THRESHOLD = 240
 
-global sampling_time_passed
-sampling_time_passed = 0 
 
 
 
 # --------------------------- OPTIONS -------------------------- #
-DYNAMIC_THRESHOLDING = False
-VIEW_IMG = False
-VIEW_SEGMENTATION = False
+VIEW_IMG = True
+VIEW_SEGMENTATION = True
 VIEW_MASK = False
 VIEW_THRESHOLD_SEGMENT = False
-SAVE_SEGMENTATION = True
+RESIZE_IMSHOW_WINDOW = False
+SAVE_SEGMENTATION = False
 SAVE_FORMAT = False     # '.avi' or '.raw'
 PRINT_TIME = False
 PRINT_SEG_DATA = True
@@ -64,11 +61,13 @@ DEVICE = 'cuda:0'      # DEVICE = 'cuda:0' or 'cpu'
 RETINA_MASKS = False
 HALF_PRECISION = True
 SHOW_CONF = True
+THRESHOLD = 240        # Initializing Threshold to detect the densest part of the smoke
 # ------------------------ YOLO PARAMETERS --------------------- #
 
 
 
 gps_t = 0
+
 # create saving directory
 username = os.getlogin( )
 tmp = datetime.datetime.now()
@@ -80,7 +79,7 @@ if EXECUTION == 'SIMULATION':
 elif EXECUTION == 'DEPLOYMENT':
     username = os.getlogin()
     maindir = Path('/home/%s/1FeedbackControl' % username)
-    
+
 runs_today = list(maindir.glob('*%s*_segmentation' % stamp))
 if runs_today:
     runs_today = [str(name) for name in runs_today]
@@ -91,12 +90,13 @@ if runs_today:
 else:
     new_run_num = 1
 savedir = maindir.joinpath('%s_run%02d_segmentation' % (stamp,new_run_num))
-os.makedirs(savedir)  
+os.makedirs(savedir)
 
 
 # YOLO paths and importing
 FILE = Path(__file__).resolve()
-YOLOv8_SEG_ROOT = FILE.parents[1] / 'scripts/modules/yolov8-seg/yolo-V8'  # YOLOv8 segmentation root directory
+# YOLOv8 segmentation root directory
+YOLOv8_SEG_ROOT = FILE.parents[1] / 'scripts/modules/yolov8-seg/yolo-V8'
 if str(YOLOv8_SEG_ROOT) not in sys.path:
     sys.path.append(str(YOLOv8_SEG_ROOT ))  # add YOLOv8_SEG_ROOT to PATH
 YOLOv8_SEG_ROOT  = Path(os.path.relpath(YOLOv8_SEG_ROOT, Path.cwd()))  # relative
@@ -104,25 +104,15 @@ YOLOv8_SEG_ROOT  = Path(os.path.relpath(YOLOv8_SEG_ROOT, Path.cwd()))  # relativ
 
 
 
-
-def time_info_callback(data):
-    global threshold, sampling_time_passed
-
-    if int(data.data) - sampling_time_passed > 1:
-        sampling_time_passed = sampling_time_passed + 1
-        if sampling_time_passed % 2 == 0:
-            threshold = threshold - 1
-    print(f"Received timestamp: {sampling_time_passed} secs ------- threshold reduced to : threshold: {threshold}", end='\r')
-
-
-
 def time_callback(gpstime):
+    """ gps time callback """
     global gps_t
     gps_t = float(gpstime.time_ref.to_sec())
-    
-    
+
+
 
 def imagecallback(img):
+    """image callback function"""
     global pub, box, video, timelog
     global MODEL
 
@@ -130,11 +120,12 @@ def imagecallback(img):
     t1 = time.time()
     img_numpy = np.frombuffer(img.data,dtype=np.uint8).reshape(img.height,img.width,-1)
     # print(img_numpy.shape) # (480,640,3)
-    
+
     if VIEW_IMG:
         img_view = img_numpy
         dim = IMGSZ
-        img_view = cv2.resize(img_view, dim, interpolation = cv2.INTER_AREA)
+        if RESIZE_IMSHOW_WINDOW:
+            img_view = cv2.resize(img_view, dim, interpolation = cv2.INTER_AREA)
         cv2.imshow('Img->Seg Node',img_view)
         cv2.waitKey(1)
 
@@ -143,7 +134,7 @@ def imagecallback(img):
         return
     else:
         results = MODEL.predict(img_numpy, conf=CONF_THRES, iou=IOU_THRES, 
-                                imgsz=IMGSZ, half=HALF_PRECISION, device=DEVICE, 
+                                imgsz=IMGSZ, half=HALF_PRECISION, device=DEVICE,
                                 verbose=False, max_det=MAX_DET, 
                                 retina_masks=RETINA_MASKS, show_conf=SHOW_CONF)
 
@@ -155,13 +146,13 @@ def imagecallback(img):
 
             max_white_pixels, data_idx = 0, 0
             x_mean, y_mean = -1, -1
-            
+
             for i in range(len(results[0].masks.data)):
-                
+
                 indices = find_element_indices(results[0].masks.data[0].cpu().numpy(), 1)
                 white_x_mean, white_y_mean, white_pixel_indices = check_white_pixels(indices, resize_orig_img)
-                
-                # looking for the instance of segmentation which has 
+
+                # looking for the instance of segmentation which has
                 # the max no. of segemented white pixels
                 white_pixel_count = len(white_pixel_indices)
                 if max_white_pixels <= white_pixel_count:
@@ -177,7 +168,7 @@ def imagecallback(img):
                 box.bbox.size_x = -1
                 box.bbox.size_y = -1
                 pub.publish(box)
-                t2, t1 = 0, 0 
+                t2, t1 = 0, 0
             else:
                 # selecting the instance which has the maximum number of segmented white pixels
                 img_mask = results[0].masks.data[data_idx].cpu().numpy()
@@ -192,20 +183,25 @@ def imagecallback(img):
                 if VIEW_MASK:
                     img_mask = cv2.circle(img_mask, (y_mean, x_mean), 5, (0, 0, 255), -1)
                     dim = IMGSZ
-                    img_mask = cv2.resize(img_mask, dim, interpolation = cv2.INTER_AREA)
+                    if RESIZE_IMSHOW_WINDOW:
+                        img_mask = cv2.resize(img_mask, dim, interpolation = cv2.INTER_AREA)
                     cv2.imshow('Segmentation Mask', img_mask)
                     cv2.waitKey(1)
 
 
                 if VIEW_SEGMENTATION:
-                    # result is a <class 'list'> in which the first element is <class 'ultralytics.engine.results.Results'>
-                    annotated_frame = results[0].plot() 
+                    # result is a <class 'list'> in which the first element is 
+                    # <class 'ultralytics.engine.results.Results'>
+                    annotated_frame = results[0].plot()
                     # centroid of smoke normalized to the size of the original image
                     x_mean = int(x_mean_norm * annotated_frame.shape[0])
                     y_mean = int(y_mean_norm * annotated_frame.shape[1])
-                    annotated_frame = cv2.circle(annotated_frame, (y_mean, x_mean), 10, (255, 0, 0), -1)
+                    annotated_frame_view = cv2.circle(annotated_frame,
+                                                 (y_mean, x_mean), 10, (255, 0, 0), -1)
                     dim = IMGSZ
-                    annotated_frame_view = cv2.resize(annotated_frame, dim, interpolation = cv2.INTER_AREA)
+                    if RESIZE_IMSHOW_WINDOW:
+                        annotated_frame_view = cv2.resize(annotated_frame,
+                                                        dim, interpolation = cv2.INTER_AREA)
                     cv2.imshow('Segmentation Window', annotated_frame_view)
                     cv2.waitKey(1)
 
@@ -217,7 +213,7 @@ def imagecallback(img):
                     y_mean = int(y_mean_norm * annotated_frame.shape[1])
                     annotated_frame = cv2.circle(annotated_frame, (y_mean, x_mean), 10, (255, 0, 0), -1)
                     saving_stamp = (f"{tmp.month:02.0f}{tmp.day:02.0f}{tmp.year:04.0f}")
-                    
+
                     if SAVE_FORMAT =='.raw':
                         fid = open(savedir.joinpath('Segmentation-%06.0f.raw' % savenum),'wb')
                         fid.write(annotated_frame.flatten())
@@ -239,7 +235,8 @@ def imagecallback(img):
                 pub.publish(box)
 
                 t2 = time.time()
-                if PRINT_TIME: print(f"Time taken from receiving to publishing: {(t2-t1)}")
+                if PRINT_TIME: 
+                    print(f"Time taken from receiving to publishing: {(t2-t1)}")
 
         else:
             # No segmnetation data received
@@ -255,11 +252,11 @@ def imagecallback(img):
         timelog.write(f'{img.header.seq},{float(img.header.stamp.to_sec())},{gps_t},{box.bbox.center.x},{box.bbox.center.y},{box.bbox.center.theta},{box.bbox.size_x}\n')
 
         if PRINT_SEG_DATA:
-            print(f'Segment center: ({box.bbox.center.x: .2f}, {box.bbox.center.y: .2f}) | Inference time: {(t2-t1): .4f} | Area of segment: {box.bbox.size_x}', end='\r')
+            print(f'Segment center: ({box.bbox.center.x: .2f}, {box.bbox.center.y: .2f}) | Inference time: {(t2-t1): .4f} | Area of segment: {box.bbox.size_x}')
 
 
 
-def init_detection_node():
+def init_segmentation_node():
     global pub, box, video, timelog
     global MODEL
 
@@ -267,7 +264,7 @@ def init_detection_node():
     box = Detection2D()
 
     print('Initializing YOLOv8 segmentation model')
-    MODEL = YOLO(YOLOv8_SEG_ROOT / 'yolov8n-seg.pt') # MODEL = YOLO(YOLOv8_SEG_ROOT / 'yolov8-best.pt')
+    MODEL = YOLO(YOLOv8_SEG_ROOT / 'yolov8n-seg.pt')
 
     # initializing video file
     if SAVE_FORMAT =='.avi':
@@ -281,15 +278,14 @@ def init_detection_node():
 
     # initializing node
     rospy.init_node('segmentation_node', anonymous=False)
-    
-    if DYNAMIC_THRESHOLDING:
-        rospy.Subscriber('sampling_time_info_topic', Float64, time_info_callback)
+
+
     if EXECUTION == 'SIMULATION':
         rospy.Subscriber('front_centre_cam', Image, imagecallback)
     if EXECUTION == 'DEPLOYMENT':
         rospy.Subscriber('/camera/image', Image, imagecallback)
         rospy.Subscriber('mavros/time_reference',TimeReference,time_callback)
-    
+
     rospy.spin()
 
 
@@ -316,7 +312,9 @@ def find_pixel_indices(arr, target_pixel = [0, 0, 0]):
     indices = []
     for row_index, row in enumerate(arr):
         for col_index, element in enumerate(row):
-            if (element[0] == target_pixel[0] and element[1] == target_pixel[1] and element[2] == target_pixel[2]):
+            if (element[0] == target_pixel[0] and
+                element[1] == target_pixel[1] and
+                element[2] == target_pixel[2]):
                 indices.append((row_index, col_index))
 
     return indices
@@ -329,11 +327,12 @@ def check_white_pixels(mask_indices, img):
     also the indices of the smoke segment above a predifined/dynamic threshold 
     (to detect the denser region of smoke)
     """
-    global threshold
 
     white_pixel_indices = []
     for idx in mask_indices:
-        if (img[idx][0] > threshold) and (img[idx][1] > threshold) and (img[idx][0] > threshold):
+        if ((img[idx][0] > THRESHOLD) and
+            (img[idx][1] > THRESHOLD) and
+            (img[idx][0] > THRESHOLD)):
             img[idx][0], img[idx][1], img[idx][0] = 0, 0, 0
             white_pixel_indices.append(idx)
 
@@ -342,7 +341,7 @@ def check_white_pixels(mask_indices, img):
     for i in range(num_white_pixels):
         x_cord_sum = x_cord_sum + white_pixel_indices[i][0]
         y_cord_sum = y_cord_sum + white_pixel_indices[i][1]
-    
+
     if num_white_pixels != 0:
         x_mean = int(x_cord_sum / num_white_pixels)
         y_mean = int(y_cord_sum / num_white_pixels)
@@ -353,7 +352,8 @@ def check_white_pixels(mask_indices, img):
     if VIEW_THRESHOLD_SEGMENT:
         img = cv2.circle(img, (y_mean, x_mean), 2, (255, 0, 0), -1)
         dim = IMGSZ
-        img_resize = cv2.resize(img, dim, interpolation = cv2.INTER_AREA)
+        if RESIZE_IMSHOW_WINDOW:
+            img_resize = cv2.resize(img, dim, interpolation = cv2.INTER_AREA)
         cv2.imshow('Thresholded Segment', img_resize)
         cv2.waitKey(1)
 
@@ -367,6 +367,6 @@ def check_white_pixels(mask_indices, img):
 
 if __name__ == '__main__':
     try:
-        init_detection_node()
+        init_segmentation_node()
     except rospy.ROSInterruptException:
         pass

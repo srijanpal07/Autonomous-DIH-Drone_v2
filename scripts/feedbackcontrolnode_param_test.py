@@ -625,17 +625,7 @@ def move_to_set_alt_test():
         print("Setpoint altitude reached!")
     else:
     	twistmsg.linear.z = 0.1*alt_diff
-    	if alt_diff < 0: 
-            print(f'Low! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} | current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}')
-        else: print(f'Low! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} | current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}')
-        # elif alt_diff < 0.3: # too low
-        #     twistmsg.linear.z = 0.5
-        #     print(f'Low! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} |',
-        #         f' current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}')
-        # elif alt_diff > 0.3: # too high
-        #     twistmsg.linear.z = -0.5
-        #     print(f'High! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} |',
-        #         f' current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}')
+        print(f'Low! move_to_alt: {move_to_alt} | current_alt: {gps_alt: .3f} | current rel_alt: {gps_alt_rel: .3f} | alt_diff : {alt_diff: .3f}')
 
     twistpub.publish(twistmsg)
     time.sleep(0.2)
