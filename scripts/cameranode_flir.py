@@ -6,7 +6,7 @@ from sensor_msgs.msg import Image
 from sensor_msgs.msg import TimeReference
 import os, datetime
 import PySpin
-import sys, subprocess, time
+import sys, time
 import cv2
 import queue
 from pathlib import Path
